@@ -33,6 +33,9 @@ export class HUD {
     this.breakEl = $('break-progress');
     this.breakFillEl = $('break-progress-fill');
     this.hintEl = $('hint-label');
+    this.playerListEl = $('player-list');
+    this.playerListHeaderEl = $('player-list-header');
+    this.playerListItemsEl = $('player-list-items');
 
     this.healthIcons = [];
     this.airIcons = [];
@@ -45,6 +48,7 @@ export class HUD {
     this.lastCoords = '';
     this.lastDebug = '';
     this.lastBreak = -1;
+    this.lastPlayerList = '';
 
     this.buildStats();
     this.buildHotbar();
@@ -135,6 +139,30 @@ export class HUD {
   setSelected(index) {
     for (let i = 0; i < this.hotbarSlots.length; i++) {
       this.hotbarSlots[i].slot.classList.toggle('selected', i === index);
+    }
+  }
+
+  /** Shows everybody currently in the world, including the local player. */
+  setPlayerList(entries, header = 'Онлайн') {
+    if (!this.playerListEl) return;
+    const list = Array.isArray(entries) ? entries : [];
+    this.playerListEl.classList.toggle('hidden', list.length === 0);
+    if (!list.length) return;
+    if (this.playerListHeaderEl) this.playerListHeaderEl.textContent = header;
+    const signature = `${header}|${list.map((p) => `${p.name}:${Math.round(p.health ?? 0)}:${p.self ? 1 : 0}`).join(',')}`;
+    if (signature === this.lastPlayerList) return;
+    this.lastPlayerList = signature;
+    this.playerListItemsEl.replaceChildren();
+    for (const player of list) {
+      const row = document.createElement('div');
+      row.className = `player-list-row${player.self ? ' self' : ''}${player.health <= 0 ? ' dead' : ''}`;
+      const name = document.createElement('span');
+      name.textContent = player.self ? `${player.name} (вы)` : player.name;
+      const health = document.createElement('span');
+      health.className = 'player-health';
+      health.textContent = `♥ ${Math.max(0, Math.round(player.health ?? 0))}`;
+      row.append(name, health);
+      this.playerListItemsEl.appendChild(row);
     }
   }
 

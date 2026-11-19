@@ -201,21 +201,39 @@ const builders = {
   villager() {
     const group = new THREE.Group();
     const legs = [];
-    legs.push(leg(group, -0.12, 0.72, 0, 0.17, 0.72, 0.2, 0x4a3b2a));
-    legs.push(leg(group, 0.12, 0.72, 0, 0.17, 0.72, 0.2, 0x4a3b2a));
-    box(group, 0.52, 0.7, 0.3, 0x6a4a2c, 0, 1.07, 0);
-    box(group, 0.4, 0.35, 0.28, 0x7a5a3a, 0, 1.2, 0);
+    legs.push(leg(group, -0.13, 0.72, 0, 0.18, 0.72, 0.21, 0x4a3b2a));
+    legs.push(leg(group, 0.13, 0.72, 0, 0.18, 0.72, 0.21, 0x4a3b2a));
+    // Long robe with a lighter apron and a belt sash.
+    box(group, 0.58, 0.72, 0.34, 0x6a4a2c, 0, 1.06, 0);
+    box(group, 0.34, 0.56, 0.36, 0x9b7a4b, 0, 0.98, -0.02);
+    box(group, 0.6, 0.08, 0.36, 0x3f2f20, 0, 0.78, 0);
+    box(group, 0.16, 0.5, 0.04, 0xb08a5c, 0, 1.05, -0.19);
+
     const head = new THREE.Group();
     head.position.set(0, 1.58, 0);
-    box(head, 0.4, 0.4, 0.4, 0xc79a6b);
-    box(head, 0.1, 0.16, 0.12, 0xb08a5c, 0, -0.02, -0.24);
-    box(head, 0.42, 0.1, 0.42, 0x3a2a1a, 0, 0.2, 0);
-    box(head, 0.08, 0.06, 0.02, 0x222222, -0.1, 0.04, -0.21);
-    box(head, 0.08, 0.06, 0.02, 0x222222, 0.1, 0.04, -0.21);
+    box(head, 0.42, 0.42, 0.42, 0xc79a6b);
+    // Large villager nose, heavy unibrow and a white beard.
+    box(head, 0.13, 0.18, 0.16, 0xb08a5c, 0, -0.03, -0.27);
+    box(head, 0.44, 0.08, 0.44, 0x3a2a1a, 0, 0.22, 0);
+    box(head, 0.36, 0.2, 0.16, 0xe8e2d2, 0, -0.25, -0.14);
+    box(head, 0.1, 0.07, 0.02, 0x2b211a, -0.11, 0.04, -0.22);
+    box(head, 0.1, 0.07, 0.02, 0x2b211a, 0.11, 0.04, -0.22);
+    box(head, 0.12, 0.05, 0.02, 0x5a3b24, -0.11, 0.11, -0.22);
+    box(head, 0.12, 0.05, 0.02, 0x5a3b24, 0.11, 0.11, -0.22);
+    box(head, 0.06, 0.06, 0.02, 0xf5f1e6, -0.11, 0.04, -0.235);
+    box(head, 0.06, 0.06, 0.02, 0xf5f1e6, 0.11, 0.04, -0.235);
     group.add(head);
-    box(group, 0.14, 0.5, 0.16, 0xc79a6b, -0.33, 1.18, 0);
-    box(group, 0.14, 0.5, 0.16, 0xc79a6b, 0.33, 1.18, 0);
-    return { group, legs, head };
+
+    const arms = [];
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.position.set(side * 0.37, 1.35, 0);
+      box(arm, 0.16, 0.42, 0.2, 0x7a5a3a, 0, -0.2, 0);
+      box(arm, 0.14, 0.16, 0.18, 0xc79a6b, 0, -0.48, 0);
+      group.add(arm);
+      arms.push(arm);
+    }
+    return { group, legs, arms, head };
   },
   iron_golem() {
     const group = new THREE.Group();

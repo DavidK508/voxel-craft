@@ -416,8 +416,8 @@ export class Player {
     return Math.max(0.05, (block.hardness * (canHarvest ? 1.5 : 5)) / speed);
   }
 
-  damage(amount, cause = '') {
-    if (this.creative || this.dead || this.damageCooldown > 0) return;
+  damage(amount, cause = '', ignoreCreative = false) {
+    if ((this.creative && !ignoreCreative) || this.dead || this.damageCooldown > 0) return;
     // Minecraft-style armor: 4% less damage per defense point, capped at 80%.
     const reduction = Math.min(0.8, Math.max(0, this.armorPoints) * 0.04);
     const dealt = reduction > 0 ? Math.max(1, amount * (1 - reduction)) : amount;

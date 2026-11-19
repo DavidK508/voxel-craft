@@ -16,6 +16,11 @@ export class ItemDrops {
     this.materials = new Map();
     this.time = 0;
     this.nextId = 1;
+    // LAN hooks. `networkSink` sends spawns instead of creating a local sprite
+    // (guests let the host own every drop); `onSpawn` echoes host-owned drops.
+    this.networkSink = null;
+    this.onSpawn = null;
+    this.pickupHandler = null;
   }
 
   getMaterial(itemId) {
@@ -40,8 +45,17 @@ export class ItemDrops {
     return material;
   }
 
-  spawn(id, count, x, y, z, velocity = null, pickupDelay = 0.55) {
+  spawn(id, count, x, y, z, velocity = null, pickupDelay = 0.55, uid = null) {
     if (!id || count <= 0) return null;
+    if (this.networkSink) {
+      this.networkSink({
+        id, count, x, y, z, pickupDelay,
+        vx: velocity?.x ?? 0,
+        vy: velocity?.y ?? 0,
+        vz: velocity?.z ?? 0,
+      });
+      return null;
+    }
     const material = this.getMaterial(id);
     if (!material) return null;
     const sprite = new THREE.Sprite(material);
@@ -51,8 +65,10 @@ export class ItemDrops {
     sprite.frustumCulled = true;
     this.scene.add(sprite);
 
+    const assignedUid = uid ?? this.nextId++;
+    if (Number.isFinite(assignedUid)) this.nextId = Math.max(this.nextId, assignedUid + 1);
     const drop = {
-      uid: this.nextId++,
+      uid: assignedUid,
       id,
       count,
       position: new THREE.Vector3(x, y, z),
@@ -67,7 +83,20 @@ export class ItemDrops {
     };
     sprite.position.set(x, y + 0.25, z);
     this.drops.push(drop);
+    this.onSpawn?.(drop);
     return drop;
+  }
+
+  /** Creates a sprite mirrored from the host without echoing it back. */
+  spawnRemote(id, count, x, y, z, velocity = null, pickupDelay = 0.2, uid = null) {
+    if (Number.isFinite(uid) && this.findByUid(uid)) return null;
+    const sink = this.networkSink;
+    this.networkSink = null;
+    try {
+      return this.spawn(id, count, x, y, z, velocity, pickupDelay, uid);
+    } finally {
+      this.networkSink = sink;
+    }
   }
 
   spawnBlockDrops(block, x, y, z, player, heldId) {
@@ -190,6 +219,9 @@ export class ItemDrops {
       const dz = drop.position.z - pz;
       const distSq = dx * dx + dy * dy + dz * dz;
       if (drop.pickupDelay <= 0 && distSq < PICKUP_RADIUS_SQ) {
+        // A guest asks the host for the item instead of taking it locally;
+        // the host removes the drop and sends it back as a `give` message.
+        if (this.pickupHandler?.(drop) === true) continue;
         const remainder = inventory.addStack({ id: drop.id, count: drop.count });
         if (!remainder) {
           this.remove(i);
@@ -237,6 +269,52 @@ export class ItemDrops {
         }
         if (a.count >= max) break;
       }
+    }
+  }
+
+  findByUid(uid) {
+    return this.drops.find((drop) => drop.uid === uid) ?? null;
+  }
+
+  removeByUid(uid) {
+    const index = this.drops.findIndex((drop) => drop.uid === uid);
+    if (index >= 0) this.remove(index);
+  }
+
+  serialize() {
+    return this.drops.map((drop) => ({
+      uid: drop.uid,
+      id: drop.id,
+      count: drop.count,
+      x: drop.position.x,
+      y: drop.position.y,
+      z: drop.position.z,
+      age: drop.age,
+    }));
+  }
+
+  /** Mirrors the host's authoritative drop list into a guest's scene. */
+  applyState(items) {
+    if (!Array.isArray(items)) return;
+    const seen = new Set();
+    for (const item of items) {
+      const uid = Number(item?.uid);
+      const id = Number(item?.id);
+      const count = Number(item?.count);
+      if (!Number.isFinite(uid) || !Number.isFinite(id) || !Number.isFinite(count)) continue;
+      seen.add(uid);
+      let drop = this.findByUid(uid);
+      if (!drop) {
+        drop = this.spawnRemote(id, count, Number(item.x) || 0, Number(item.y) || 0,
+          Number(item.z) || 0, new THREE.Vector3(), 0.2, uid);
+        if (!drop) continue;
+      }
+      drop.count = count;
+      drop.position.set(Number(item.x) || 0, Number(item.y) || 0, Number(item.z) || 0);
+      drop.age = Number(item.age) || 0;
+    }
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      if (!seen.has(this.drops[i].uid)) this.remove(i);
     }
   }
 

@@ -14,6 +14,8 @@ import { getItem, getMaxStack, createItemStack, getArmorInfo } from '../src/shar
 import { findRecipe } from '../src/shared/recipes.js';
 import { SimplexNoise, NoiseField, mulberry32 } from '../src/shared/noise.js';
 import { Inventory } from '../src/game/Inventory.js';
+import { ItemDrops } from '../src/game/ItemDrops.js';
+import { offersForVillager, performTrade, countItem } from '../src/shared/trades.js';
 import {
   advanceTimeOfDay,
   cycleDurations,
@@ -776,6 +778,11 @@ await test('creative players ignore damage and break blocks instantly', () => {
   player.damage(10, 'тест');
   assert.equal(player.health, 20, 'creative damage must be ignored');
 
+  player.damage(5, 'pvp', true);
+  assert.equal(player.health, 15, 'PvP damage must bypass creative immunity');
+  player.health = 20;
+  player.damageCooldown = 0;
+
   player.hunger = 0;
   player.air = 0;
   player.updateVitals(1 / 60, world);
@@ -806,6 +813,13 @@ await test('LAN server relays presence, world state and edits', async () => {
     const welcome = clientEvents.find((message) => message.type === 'welcome');
     assert.ok(welcome.id, 'the server should assign a client id');
 
+    lan.sendLanTo(welcome.id, { type: 'give', stack: { id: 440, count: 1 } }, 'host');
+    await waitFor(() => clientEvents.some((message) => message.type === 'give'));
+    assert.ok(
+      !hostEvents.some((message) => message.type === 'give'),
+      'a targeted give must not echo back to the host',
+    );
+
     lan.sendLan({ type: 'hello', name: 'Тест' }, 'client');
     await waitFor(() => hostEvents.some(
       (message) => message.type === 'client-joined' && message.name === 'Тест',
@@ -828,6 +842,58 @@ await test('LAN server relays presence, world state and edits', async () => {
   } finally {
     lan.stopLan();
   }
+});
+
+await test('villager trades consume payment and deliver goods', () => {
+  const inventory = new Inventory();
+  inventory.setSlot(0, { id: 441, count: 16 });
+  const offers = offersForVillager({ position: { x: 10.2, z: -4.7 } });
+  assert.equal(offers.length, 4, 'a villager should expose four offers');
+  assert.deepEqual(offersForVillager({ position: { x: 10.2, z: -4.7 } }), offers);
+  const wheatOffer = offers.find((offer) => offer.give.id === 441) ?? {
+    give: { id: 441, count: 16 }, get: { id: 440, count: 1 },
+  };
+  const result = performTrade(inventory, wheatOffer);
+  assert.equal(result, null, 'the goods should fit in the inventory');
+  assert.equal(countItem(inventory, 441), 0, 'payment must be consumed');
+  assert.equal(countItem(inventory, 440), 1, 'the player must receive emeralds');
+  assert.equal(performTrade(inventory, wheatOffer), false, 'a broke player cannot trade');
+});
+
+await test('drops keep stable network ids and can be mirrored', () => {
+  const scene = { add() {}, remove() {} };
+  const icons = new Map([
+    [441, { width: 16, height: 16 }],
+    [440, { width: 16, height: 16 }],
+  ]);
+  const assets = { iconCanvasCache: icons, blockIconCache: icons };
+  const drops = new ItemDrops(scene, makeFlatWorld(5), assets, null);
+  const drop = drops.spawn(441, 3, 1, 6, 2, null, 0.5, 77);
+  assert.equal(drop.uid, 77);
+  assert.equal(drops.findByUid(77), drop);
+  assert.deepEqual(drops.serialize().map((item) => item.uid), [77]);
+
+  drops.applyState([
+    { uid: 77, id: 441, count: 2, x: 4, y: 7, z: 5, age: 1 },
+    { uid: 78, id: 440, count: 1, x: 6, y: 7, z: 5, age: 0 },
+  ]);
+  assert.equal(drops.drops.length, 2);
+  assert.equal(drops.findByUid(77).count, 2);
+  assert.equal(drops.findByUid(77).position.x, 4);
+  assert.ok(drops.findByUid(78), 'new host drops should be created locally');
+
+  drops.applyState([{ uid: 78, id: 440, count: 1, x: 6, y: 7, z: 5 }]);
+  assert.equal(drops.findByUid(77), null, 'stale drops are removed');
+  drops.removeByUid(999);
+  assert.equal(drops.drops.length, 1);
+
+  let echoed = 0;
+  drops.networkSink = () => { echoed++; };
+  assert.ok(drops.spawnRemote(440, 2, 0, 0, 0, null, 0.2, 79), 'remote drop should be mirrored');
+  assert.equal(echoed, 0, 'mirrored drops must not be echoed back to the host');
+  assert.equal(drops.spawnRemote(440, 1, 0, 0, 0, null, 0.2, 79), null, 'duplicate uid must be ignored');
+  drops.networkSink = null;
+  drops.dispose();
 });
 
 console.log(`\n${results.length - failed}/${results.length} tests passed.`);

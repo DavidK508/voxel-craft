@@ -9,6 +9,7 @@ const {
   startLanServer,
   joinLanServer,
   sendLan,
+  sendLanTo,
   stopLan,
 } = require('./src/main/lan.js');
 
@@ -320,6 +321,20 @@ function createWindow() {
           state = await mainWindow.webContents.executeJavaScript('window.voxelGame?.state ?? "none"');
           if (state === 'playing') break;
         }
+        const evalScript = process.env.VOXELCRAFT_AUTOSHOT_EVAL;
+        if (evalScript) {
+          const result = await mainWindow.webContents.executeJavaScript(`
+            (async () => {
+              const g = window.voxelGame;
+              try {
+                return { ok: true, value: await (${evalScript}) };
+              } catch (error) {
+                return { ok: false, error: String(error?.stack || error) };
+              }
+            })();
+          `);
+          console.log('[autoshot] eval', JSON.stringify(result));
+        }
         const hold = Number(process.env.VOXELCRAFT_AUTOSHOT_HOLD) || 0;
         if (hold > 0) {
           const edit = process.env.VOXELCRAFT_AUTOSHOT_EDIT;
@@ -435,6 +450,20 @@ function createWindow() {
               lanStatus: document.getElementById('lan-status')?.textContent ?? null,
               lanLog: window.__lanLog?.slice(-24) ?? null,
               inventoryOpen: g?.inventoryUI?.isOpen?.() ?? null,
+              previewVisible: Boolean(document.querySelector('#character-preview canvas')),
+              tradeOpen: g?.tradeUI?.isOpen?.() ?? null,
+              tradeOffers: g?.tradeOffers?.length ?? null,
+              drops: g?.drops?.drops?.length ?? null,
+              emeralds: g?.inventory?.slots?.filter((s) => s?.id === 440)
+                .reduce((sum, s) => sum + s.count, 0) ?? null,
+              dropHooks: g?.drops ? {
+                sink: Boolean(g.drops.networkSink),
+                onSpawn: Boolean(g.drops.onSpawn),
+                pickup: Boolean(g.drops.pickupHandler),
+              } : null,
+              netPort: g?.net?.port ?? null,
+              playerList: document.getElementById('player-list-items')?.children?.length ?? null,
+              playerNames: g?.remotePlayers ? [...g.remotePlayers.values()].map((p) => p.name + ':' + (p.health ?? 20)) : null,
               errors: document.getElementById('fatal-error-text')?.textContent ?? null,
             };
           })();
@@ -497,6 +526,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('lan:join', (_event, address, port) => joinLanServer(address, port));
   ipcMain.on('lan:leave', () => stopLan());
   ipcMain.on('lan:send', (_event, payload) => sendLan(payload));
+  ipcMain.on('lan:send-to', (_event, clientId, payload) => sendLanTo(clientId, payload));
   ipcMain.handle('app:info', () => ({
     version: app.getVersion(),
     electron: process.versions.electron,

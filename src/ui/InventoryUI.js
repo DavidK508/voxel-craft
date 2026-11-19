@@ -1,4 +1,5 @@
 import { RECIPES, findRecipe, recipeToPlacement } from '../shared/recipes.js';
+import { CharacterPreview } from './CharacterPreview.js';
 import {
   ITEM_LIST,
   createItemStack,
@@ -68,6 +69,7 @@ export class InventoryUI {
     this.mouseX = 0;
     this.mouseY = 0;
     this.lastHoverKey = null;
+    this.preview = new CharacterPreview($('character-preview'));
 
     this.buildPermanentSlots();
     this.buildCursorView();
@@ -485,6 +487,8 @@ export class InventoryUI {
     this.screen.classList.remove('hidden');
     this.tooltipEl.classList.add('hidden');
     this.refresh();
+    this.preview?.setArmor(this.inventory.armor);
+    this.preview?.start();
   }
 
   close() {
@@ -502,6 +506,7 @@ export class InventoryUI {
     this.openState = false;
     this.creative = false;
     this.recipe = null;
+    this.preview?.stop();
     this.screen.classList.add('hidden');
     this.cursorEl.classList.add('hidden');
     this.tooltipEl.classList.add('hidden');
@@ -511,6 +516,10 @@ export class InventoryUI {
 
   isOpen() {
     return this.openState;
+  }
+
+  tickPreview(dt) {
+    if (this.openState) this.preview?.tick(dt);
   }
 
   returnStack(stack) {
@@ -593,6 +602,7 @@ export class InventoryUI {
     this.renderSlot(this.resultView, this.getResultStack());
     this.renderCursor();
     this.updateRecipeAvailability();
+    this.preview?.setArmor(this.inventory.armor);
   }
 
   renderSlot(view, stack) {

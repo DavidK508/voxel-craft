@@ -2,27 +2,34 @@ import * as THREE from 'three';
 
 const materialCache = new Map();
 
-function material(color) {
-  let mat = materialCache.get(color);
+// BoxGeometry material order: +X, -X, +Y, -Y, +Z, -Z. A tiny fake light on
+// each face makes the blocky avatars readable without adding real lights.
+const FACE_SHADES = [0.82, 0.72, 1.0, 0.55, 0.92, 0.76];
+
+function material(color, shade = 1) {
+  const key = `${color}:${shade}`;
+  let mat = materialCache.get(key);
   if (!mat) {
-    mat = new THREE.MeshBasicMaterial({ color, fog: true });
-    materialCache.set(color, mat);
+    const tinted = new THREE.Color(color).multiplyScalar(shade);
+    mat = new THREE.MeshBasicMaterial({ color: tinted, fog: true });
+    materialCache.set(key, mat);
   }
   return mat;
 }
 
+function shaded(color) {
+  return FACE_SHADES.map((shade) => material(color, shade));
+}
+
 function box(parent, w, h, d, color, x = 0, y = 0, z = 0) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material(color));
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), shaded(color));
   mesh.position.set(x, y, z);
   parent.add(mesh);
   return mesh;
 }
 
 function overlay(parent, w, h, d, x = 0, y = 0, z = 0) {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshBasicMaterial({ color: 0xb7b7bd, fog: true }),
-  );
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), shaded(0xb7b7bd));
   mesh.position.set(x, y, z);
   mesh.visible = false;
   parent.add(mesh);
@@ -31,16 +38,18 @@ function overlay(parent, w, h, d, x = 0, y = 0, z = 0) {
 
 const ARMOR_COLORS = {
   leather: 0x8a5a2c,
-  iron: 0xb7b7bd,
-  diamond: 0x2ab8ad,
+  iron: 0xc2c7cf,
+  diamond: 0x2fd0bf,
 };
 
+const SKIN = 0xd9a178;
+const SHIRT = 0x3f8fd0;
+const PANTS = 0x354789;
+const HAIR = 0x3a2a1e;
+
 /**
- * A small blocky avatar for the third-person camera and LAN players.
- *
- * The model is built from boxes only, matching the rest of the game (the scene
- * has no lights, so everything uses MeshBasicMaterial). It faces -Z at yaw 0,
- * which is exactly the direction Player.getDirection() returns.
+ * A blocky avatar for third person, LAN players and the inventory preview.
+ * Faces -Z at yaw 0, exactly like Player.getDirection().
  */
 export class PlayerModel {
   constructor(name = '') {
@@ -53,52 +62,77 @@ export class PlayerModel {
     this.body = new THREE.Group();
     this.body.position.y = 1.08;
     this.group.add(this.body);
-    box(this.body, 0.5, 0.72, 0.28, 0x3f8fd0);
+    box(this.body, 0.54, 0.72, 0.3, SHIRT);
+    box(this.body, 0.56, 0.09, 0.32, 0x2c2f36, 0, -0.28, 0);
+    box(this.body, 0.2, 0.07, 0.32, 0x9fd0ec, 0, 0.33, -0.01);
 
     this.head = new THREE.Group();
     this.head.position.y = 1.44;
     this.group.add(this.head);
-    box(this.head, 0.46, 0.46, 0.46, 0xc98e63, 0, 0.23, 0);
-    // Face: two eyes and a mouth on the -Z side.
-    box(this.head, 0.09, 0.09, 0.02, 0x2b2b33, -0.11, 0.28, -0.235);
-    box(this.head, 0.09, 0.09, 0.02, 0x2b2b33, 0.11, 0.28, -0.235);
-    box(this.head, 0.16, 0.04, 0.02, 0x7a4a35, 0, 0.13, -0.235);
-    // Hair cap.
-    box(this.head, 0.48, 0.14, 0.48, 0x3b2a1e, 0, 0.39, 0.01);
+    box(this.head, 0.48, 0.48, 0.48, SKIN, 0, 0.23, 0);
+    // Eyes: white sclera with dark pupils on the -Z face.
+    box(this.head, 0.12, 0.11, 0.02, 0xf5f1e6, -0.115, 0.28, -0.25);
+    box(this.head, 0.12, 0.11, 0.02, 0xf5f1e6, 0.115, 0.28, -0.25);
+    box(this.head, 0.055, 0.07, 0.025, 0x33435c, -0.105, 0.275, -0.265);
+    box(this.head, 0.055, 0.07, 0.025, 0x33435c, 0.125, 0.275, -0.265);
+    box(this.head, 0.11, 0.025, 0.02, HAIR, -0.115, 0.355, -0.255);
+    box(this.head, 0.11, 0.025, 0.02, HAIR, 0.115, 0.355, -0.255);
+    box(this.head, 0.08, 0.1, 0.07, SKIN, 0, 0.19, -0.26);
+    box(this.head, 0.17, 0.035, 0.02, 0x8d5245, 0, 0.09, -0.25);
+    // Hair cap and sideburns.
+    box(this.head, 0.5, 0.13, 0.5, HAIR, 0, 0.41, 0.01);
+    box(this.head, 0.05, 0.24, 0.5, HAIR, -0.24, 0.31, 0.01);
+    box(this.head, 0.05, 0.24, 0.5, HAIR, 0.24, 0.31, 0.01);
 
     this.leftArm = new THREE.Group();
-    this.leftArm.position.set(-0.33, 1.4, 0);
+    this.leftArm.position.set(-0.35, 1.4, 0);
     this.group.add(this.leftArm);
-    box(this.leftArm, 0.16, 0.68, 0.18, 0xc98e63, 0, -0.32, 0);
+    box(this.leftArm, 0.18, 0.28, 0.2, SHIRT, 0, -0.13, 0);
+    box(this.leftArm, 0.16, 0.4, 0.18, SKIN, 0, -0.46, 0);
 
     this.rightArm = new THREE.Group();
-    this.rightArm.position.set(0.33, 1.4, 0);
+    this.rightArm.position.set(0.35, 1.4, 0);
     this.group.add(this.rightArm);
-    box(this.rightArm, 0.16, 0.68, 0.18, 0xc98e63, 0, -0.32, 0);
+    box(this.rightArm, 0.18, 0.28, 0.2, SHIRT, 0, -0.13, 0);
+    box(this.rightArm, 0.16, 0.4, 0.18, SKIN, 0, -0.46, 0);
 
     this.leftLeg = new THREE.Group();
-    this.leftLeg.position.set(-0.125, 0.72, 0);
+    this.leftLeg.position.set(-0.13, 0.72, 0);
     this.group.add(this.leftLeg);
-    box(this.leftLeg, 0.2, 0.72, 0.22, 0x3b4b8a, 0, -0.36, 0);
+    box(this.leftLeg, 0.22, 0.72, 0.23, PANTS, 0, -0.36, 0);
+    box(this.leftLeg, 0.24, 0.14, 0.28, 0x403223, 0, -0.65, -0.02);
 
     this.rightLeg = new THREE.Group();
-    this.rightLeg.position.set(0.125, 0.72, 0);
+    this.rightLeg.position.set(0.13, 0.72, 0);
     this.group.add(this.rightLeg);
-    box(this.rightLeg, 0.2, 0.72, 0.22, 0x3b4b8a, 0, -0.36, 0);
+    box(this.rightLeg, 0.22, 0.72, 0.23, PANTS, 0, -0.36, 0);
+    box(this.rightLeg, 0.24, 0.14, 0.28, 0x403223, 0, -0.65, -0.02);
 
     // Armor overlays, hidden until a matching piece is equipped.
     this.armor = {
       head: overlay(this.head, 0.52, 0.52, 0.52, 0, 0.23, 0),
-      chest: overlay(this.body, 0.56, 0.56, 0.34, 0, 0.06, 0),
+      chest: overlay(this.body, 0.58, 0.58, 0.34, 0, 0.05, 0),
       legs: [
-        overlay(this.leftLeg, 0.23, 0.42, 0.25, 0, -0.22, 0),
-        overlay(this.rightLeg, 0.23, 0.42, 0.25, 0, -0.22, 0),
+        overlay(this.leftLeg, 0.24, 0.46, 0.26, 0, -0.25, 0),
+        overlay(this.rightLeg, 0.24, 0.46, 0.26, 0, -0.25, 0),
       ],
       feet: [
-        overlay(this.leftLeg, 0.24, 0.18, 0.28, 0, -0.63, -0.02),
-        overlay(this.rightLeg, 0.24, 0.18, 0.28, 0, -0.63, -0.02),
+        overlay(this.leftLeg, 0.26, 0.2, 0.3, 0, -0.63, -0.02),
+        overlay(this.rightLeg, 0.26, 0.2, 0.3, 0, -0.63, -0.02),
       ],
     };
+    this.armorDetails = {
+      // Metal helmets get a dark visor so they don't look like solid cubes.
+      head: [box(this.head, 0.3, 0.07, 0.02, 0x1b2026, 0, 0.29, -0.27)],
+      chest: [
+        box(this.body, 0.13, 0.13, 0.02, 0xffffff, 0, 0.1, -0.18),
+        box(this.body, 0.16, 0.1, 0.22, 0xffffff, -0.33, 0.25, 0),
+        box(this.body, 0.16, 0.1, 0.22, 0xffffff, 0.33, 0.25, 0),
+      ],
+      legs: [],
+      feet: [],
+    };
+    this.setArmor([]);
 
     this.nameTag = this.buildNameTag();
     this.group.add(this.nameTag);
@@ -157,10 +191,16 @@ export class PlayerModel {
     };
     for (const [slot, stack] of Object.entries(bySlot)) {
       const targets = Array.isArray(this.armor[slot]) ? this.armor[slot] : [this.armor[slot]];
-      const color = stack?.color ?? ARMOR_COLORS[stack?.material] ?? 0xb7b7bd;
+      const materialName = stack?.material ?? 'iron';
+      const color = stack?.color ?? ARMOR_COLORS[materialName] ?? 0xb7b7bd;
+      const metal = materialName === 'iron' || materialName === 'diamond';
       for (const mesh of targets) {
         mesh.visible = Boolean(stack);
-        if (stack) mesh.material.color.setHex(color);
+        if (stack) mesh.material = shaded(color);
+      }
+      for (const mesh of this.armorDetails[slot] ?? []) {
+        mesh.visible = Boolean(stack) && metal;
+        if (stack && metal) mesh.material = shaded(materialName === 'diamond' ? 0x0c5f5a : 0x4a5058);
       }
     }
   }
@@ -169,10 +209,6 @@ export class PlayerModel {
     this.group.visible = visible;
   }
 
-  /**
-   * @param {{position: THREE.Vector3, yaw: number, pitch: number, velocity: THREE.Vector3,
-   *          onGround: boolean, sneaking: boolean}} state
-   */
   update(state, dt) {
     if (!state) return;
     const { position, yaw = 0, pitch = 0 } = state;
@@ -198,12 +234,13 @@ export class PlayerModel {
   }
 
   dispose() {
+    const cached = new Set(materialCache.values());
     this.group.traverse((child) => {
-      if (child.isMesh) {
-        child.geometry?.dispose?.();
-        if (child.material && child.material !== materialCache.get(child.material.color?.getHex?.())) {
-          child.material.dispose?.();
-        }
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const mat of materials) {
+        if (mat && !cached.has(mat)) mat.dispose?.();
       }
     });
     this.nameTag.userData.texture?.dispose?.();

@@ -126,7 +126,6 @@ function startLanServer(port = 25565) {
 
       lanWrite(socket, { type: 'welcome', id, port: lanServerPort });
       if (lanStateCache) lanWrite(socket, lanStateCache);
-      hostSender({ type: 'client-joined', id, name: client.name });
     });
 
     server.on('error', (error) => {
@@ -213,6 +212,14 @@ function sendLan(payload, role = 'auto') {
   }
 }
 
+/** Sends a private message from the host to one guest (items, damage, etc.). */
+function sendLanTo(clientId, payload, role = 'auto') {
+  if (!clientId || !payload || typeof payload !== 'object') return;
+  if (role === 'client' || (!lanServer && lanClient)) return;
+  const client = lanClients.get(String(clientId));
+  if (client) lanWrite(client.socket, payload);
+}
+
 function stopLan() {
   stopLanClient();
   stopLanServer();
@@ -233,6 +240,7 @@ module.exports = {
   startLanServer,
   joinLanServer,
   sendLan,
+  sendLanTo,
   stopLan,
   lanAddresses,
   lanStatus,

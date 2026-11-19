@@ -7,6 +7,7 @@ import {
 } from '../shared/constants.js';
 import { getBlock } from '../shared/blocks.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
+import { offersForVillager, performTrade } from '../shared/trades.js';
 import {
   GAME_MODE_CREATIVE,
   GAME_MODE_LABELS,
@@ -31,6 +32,7 @@ import { createTextureArray, TerrainMaterials } from '../render/TerrainMaterials
 import { Sky } from '../render/Sky.js';
 import { HUD } from '../ui/HUD.js';
 import { InventoryUI } from '../ui/InventoryUI.js';
+import { TradeUI } from '../ui/TradeUI.js';
 import { World } from '../world/World.js';
 import { FluidSimulation } from '../world/Fluids.js';
 import {
@@ -182,6 +184,12 @@ export class Game {
       onCloseRequest: () => this.closeInventory(),
       audio: this.audio,
     });
+    this.tradeUI = new TradeUI({
+      assets: this.assets,
+      audio: this.audio,
+      onTrade: (offer) => this.executeTrade(offer),
+      onClose: () => this.closeTrade(),
+    });
     this.input = new Input(this.canvas);
 
     this.playerModel = new PlayerModel();
@@ -248,8 +256,11 @@ export class Game {
     this.remoteModels = new Map();
     this.netSendTimer = 0;
     this.networkClock = 0;
+    this.dropsClock = 0;
     this.netName = localStorage.getItem('voxelcraft:netName') || 'Игрок';
     this.pendingNetworkState = null;
+    this.tradeEntity = null;
+    this.tradeOffers = [];
 
     this.screens = {
       menu: $('main-menu'),
@@ -260,6 +271,7 @@ export class Game {
       pause: $('pause-screen'),
       settings: $('settings-screen'),
       network: $('network-screen'),
+      trade: $('trade-screen'),
       death: $('death-screen'),
     };
     this.loadingTitle = document.querySelector('.loading-title');
@@ -436,12 +448,13 @@ export class Game {
     toggleHidden(this.screens.network, state !== 'network');
     toggleHidden(this.screens.loading, state !== 'loading');
     toggleHidden(this.screens.inventory, state !== 'inventory');
+    toggleHidden(this.screens.trade, state !== 'trade');
     toggleHidden(this.screens.pause, state !== 'paused');
     toggleHidden(this.screens.settings, state !== 'settings');
     toggleHidden(this.screens.death, state !== 'dead');
     toggleHidden(
       this.screens.hud,
-      !(inWorld && ['playing', 'inventory', 'paused', 'settings', 'dead'].includes(state)),
+      !(inWorld && ['playing', 'inventory', 'trade', 'paused', 'settings', 'dead'].includes(state)),
     );
   }
 
@@ -919,13 +932,14 @@ export class Game {
     const port = clamp(Number($('lan-port')?.value) || 25565, 1024, 65535);
     localStorage.setItem('voxelcraft:lanPort', String(port));
 
-    this.net = { role: 'host', id: 'host', name };
+    this.net = { role: 'host', id: 'host', name, port };
     this.remotePlayers.clear();
     this.clearRemotePlayers();
     this.setLanStatus('Запуск сервера…');
 
     try {
       const info = await this.gameAPI.lanHost(port);
+      this.net.port = info?.port ?? port;
       const addresses = (info.addresses?.length ? info.addresses : ['127.0.0.1'])
         .map((address) => `${address}:${info.port}`)
         .join(', ');
@@ -980,6 +994,7 @@ export class Game {
     this.pendingNetworkState = null;
     this.remotePlayers.clear();
     this.clearRemotePlayers();
+    this.hud?.setPlayerList?.([], 'Онлайн');
   }
 
   handleLanEvent(message) {
@@ -995,12 +1010,14 @@ export class Game {
         if (this.net?.role === 'host') {
           this.setLanStatus(`${message.name || 'Игрок'} подключился`);
           this.ensureRemotePlayer(message.id, message.name);
+          this.rememberRemotePlayer(message.id, message.name);
           if (this.world) this.broadcastNetworkState();
         }
         break;
       case 'player-joined':
         if (this.net && message.id !== this.net.id) {
           this.ensureRemotePlayer(message.id, message.name);
+          this.rememberRemotePlayer(message.id, message.name);
         }
         break;
       case 'peer-left':
@@ -1023,6 +1040,81 @@ export class Game {
           this.timeOfDay = clamp(Number(message.time) || 0, 0, 24000);
         }
         break;
+      case 'drop':
+        if (!this.drops) break;
+        if (this.net?.role === 'host' && !Number.isFinite(Number(message.uid))) {
+          // A guest announced a drop; the host owns it from now on.
+          this.drops.spawn(
+            Number(message.id), Number(message.count),
+            Number(message.x) || 0, Number(message.y) || 0, Number(message.z) || 0,
+            new THREE.Vector3(Number(message.vx) || 0, Number(message.vy) || 0, Number(message.vz) || 0),
+            Number(message.pickupDelay) || 0.55,
+          );
+        } else if (this.net?.role === 'client' && Number.isFinite(Number(message.uid))) {
+          const drop = this.drops.spawnRemote(
+            Number(message.id), Number(message.count),
+            Number(message.x) || 0, Number(message.y) || 0, Number(message.z) || 0,
+            new THREE.Vector3(Number(message.vx) || 0, Number(message.vy) || 0, Number(message.vz) || 0),
+            0.25, Number(message.uid),
+          );
+          if (drop && Number.isFinite(Number(message.age))) drop.age = Number(message.age);
+        }
+        break;
+      case 'drop-remove':
+        this.drops?.removeByUid(Number(message.uid));
+        break;
+      case 'drops':
+        if (this.net?.role === 'client') this.drops?.applyState(message.items);
+        break;
+      case 'pickup': {
+        if (this.net?.role !== 'host') break;
+        const drop = this.drops?.findByUid(Number(message.uid));
+        const remote = this.remotePlayers.get(message.id);
+        if (!drop || !remote) break;
+        const dx = drop.position.x - remote.x;
+        const dy = drop.position.y - (remote.y + 0.85);
+        const dz = drop.position.z - remote.z;
+        if (dx * dx + dy * dy + dz * dz <= 4) this.grantNetworkDrop(message.id, drop);
+        break;
+      }
+      case 'give': {
+        if (this.net?.role !== 'client' || !message.stack) break;
+        const remainder = this.inventory?.addStack({
+          id: Number(message.stack.id), count: Number(message.stack.count),
+        });
+        this.audio?.playPickup();
+        if (remainder && this.player) {
+          this.drops?.spawnStack(remainder, this.player.position.x, this.player.position.y + 1, this.player.position.z, 0.4);
+        }
+        this.onInventoryChanged();
+        if (this.inventoryUI.isOpen()) this.inventoryUI.render();
+        break;
+      }
+      case 'attack':
+        if (this.net?.role !== 'host') break;
+        this.applyPlayerHit(
+          message.target,
+          message.damage,
+          message.id,
+          this.remotePlayers.get(message.id)?.name || 'Игрок',
+        );
+        break;
+      case 'player-hit':
+        if (message.target === this.net?.id || this.remotePlayers.has(message.target)) {
+          this.applyPlayerHit(message.target, message.damage, message.attacker, message.attackerName);
+        }
+        break;
+      case 'player-death': {
+        const victim = this.remotePlayers.get(message.target);
+        if (message.target === this.net?.id) {
+          this.hud?.toast(`${message.killer || 'Игрок'} убил вас`, 3600);
+        } else {
+          if (victim) victim.health = 0;
+          this.hud?.toast(`${message.killer || 'Игрок'} убил ${victim?.name || 'игрока'}`, 3200);
+        }
+        this.updatePlayerList();
+        break;
+      }
       case 'error':
         this.setLanStatus(`Ошибка сети: ${message.message}`, true);
         break;
@@ -1031,6 +1123,7 @@ export class Game {
           this.net = null;
           this.remotePlayers.clear();
           this.clearRemotePlayers();
+          this.hud?.setPlayerList?.([], 'Онлайн');
           if (this.world) {
             this.hud?.toast?.('Соединение с сервером потеряно', 3200);
             this.exitToMainMenu();
@@ -1068,6 +1161,7 @@ export class Game {
       dimension: state.dimension ?? 'overworld',
       edits: Array.isArray(state.edits) ? state.edits : [],
       fluids: Array.isArray(state.fluids) ? state.fluids : [],
+      drops: Array.isArray(state.drops) ? state.drops : [],
       entities: [],
       renderDistance: state.renderDistance ?? this.settings.renderDistance,
       settings: { ...this.settings, ...(state.settings ?? {}) },
@@ -1095,9 +1189,11 @@ export class Game {
         }
       }
     }
+    if (Array.isArray(state?.drops)) this.drops?.applyState(state.drops);
     this.pendingNetworkState = null;
     this.hud?.toast?.('Подключено к LAN-миру', 3000);
     this.sendNetworkPlayer();
+    this.updatePlayerList();
   }
 
   networkPlayerPayload() {
@@ -1110,6 +1206,8 @@ export class Game {
       z: this.player.position.z,
       yaw: this.player.yaw,
       pitch: this.player.pitch,
+      health: Math.max(0, Math.round(this.player.health)),
+      armor: (this.inventory?.armor ?? []).map((stack) => stack?.id ?? 0),
     };
   }
 
@@ -1134,6 +1232,7 @@ export class Game {
       dimension: this.dimension,
       edits: this.world.serializeEdits(),
       fluids: this.fluids ? this.fluids.serialize() : [],
+      drops: this.drops ? this.drops.serialize() : [],
       renderDistance: this.world.renderDistance,
       settings: { ...this.settings, renderDistance: this.world.renderDistance },
       player: this.player.serialize(),
@@ -1158,11 +1257,17 @@ export class Game {
     if (this.netSendTimer < 0.15) return;
     this.netSendTimer = 0;
     this.sendNetworkPlayer();
+    this.updatePlayerList();
     if (this.net.role === 'host') {
       this.networkClock += 0.15;
       if (this.networkClock >= 1.5) {
         this.networkClock = 0;
         this.gameAPI?.lanSend?.({ type: 'time', time: this.timeOfDay });
+      }
+      this.dropsClock += 0.15;
+      if (this.dropsClock >= 0.75) {
+        this.dropsClock = 0;
+        this.gameAPI?.lanSend?.({ type: 'drops', items: this.drops?.serialize() ?? [] });
       }
     }
   }
@@ -1182,6 +1287,17 @@ export class Game {
     return model;
   }
 
+  /** Adds a placeholder so the online list shows a player before their first move. */
+  rememberRemotePlayer(id, name = 'Игрок') {
+    if (!id || id === this.net?.id || this.remotePlayers.has(id)) return;
+    const at = this.player?.position ?? this.spawn ?? { x: 0, y: 0, z: 0 };
+    this.remotePlayers.set(id, {
+      name: name || 'Игрок',
+      x: at.x, y: at.y, z: at.z,
+      yaw: 0, pitch: 0, speed: 0, health: 20,
+    });
+  }
+
   updateRemotePlayer(message) {
     if (!message?.id || !this.net) return;
     if (message.id === this.net.id) return;
@@ -1197,11 +1313,19 @@ export class Game {
       yaw: Number(message.yaw) || 0,
       pitch: Number(message.pitch) || 0,
       speed,
+      health: Number.isFinite(Number(message.health))
+        ? Number(message.health)
+        : (previous?.health ?? 20),
     };
     this.remotePlayers.set(message.id, player);
     const model = this.ensureRemotePlayer(message.id, player.name);
     if (!model) return;
-    model.setVisible(true);
+    if (Array.isArray(message.armor)) {
+      model.setArmor(message.armor.map((id) => (
+        id ? { material: getItem(Number(id))?.iconMaterial } : null
+      )));
+    }
+    model.setVisible(player.health > 0);
     model.update({
       position: new THREE.Vector3(player.x, player.y, player.z),
       yaw: player.yaw,
@@ -1247,6 +1371,196 @@ export class Game {
       this.fluids?.remove(x, y, z);
       this.fluids?.wake(x, y, z);
     }
+  }
+
+  /* ---------- Shared drops, online list and PvP ---------- */
+
+  configureDropsNetwork() {
+    if (!this.drops) return;
+    this.drops.networkSink = null;
+    this.drops.onSpawn = null;
+    this.drops.pickupHandler = null;
+    if (this.net?.role === 'host') {
+      this.drops.onSpawn = (drop) => this.broadcastDropSpawn(drop);
+    } else if (this.net?.role === 'client') {
+      this.drops.networkSink = (info) => this.sendDropSpawn(info);
+      this.drops.pickupHandler = (drop) => this.requestDropPickup(drop);
+    }
+  }
+
+  broadcastDropSpawn(drop) {
+    if (this.net?.role !== 'host') return;
+    this.gameAPI?.lanSend?.({
+      type: 'drop',
+      uid: drop.uid,
+      id: drop.id,
+      count: drop.count,
+      x: drop.position.x,
+      y: drop.position.y,
+      z: drop.position.z,
+      vx: drop.velocity.x,
+      vy: drop.velocity.y,
+      vz: drop.velocity.z,
+      age: drop.age,
+    });
+  }
+
+  sendDropSpawn(info) {
+    if (this.net?.role !== 'client') return;
+    this.gameAPI?.lanSend?.({ type: 'drop', ...info });
+  }
+
+  requestDropPickup(drop) {
+    if (this.net?.role !== 'client') return false;
+    this.gameAPI?.lanSend?.({ type: 'pickup', uid: drop.uid });
+    return true;
+  }
+
+  grantNetworkDrop(clientId, drop) {
+    if (!drop || !clientId) return;
+    this.drops.removeByUid(drop.uid);
+    this.gameAPI?.lanSend?.({ type: 'drop-remove', uid: drop.uid });
+    this.gameAPI?.lanSendTo?.(clientId, {
+      type: 'give', stack: { id: drop.id, count: drop.count },
+    });
+  }
+
+  /** The host also picks up drops lying near connected players. */
+  updateNetworkDrops() {
+    if (this.net?.role !== 'host' || !this.drops) return;
+    for (const drop of [...this.drops.drops]) {
+      if (drop.age < 0.6) continue;
+      for (const [id, player] of this.remotePlayers) {
+        if ((player.health ?? 20) <= 0) continue;
+        const dx = drop.position.x - player.x;
+        const dy = drop.position.y - (player.y + 0.85);
+        const dz = drop.position.z - player.z;
+        if (dx * dx + dy * dy + dz * dz < 3.24) {
+          this.grantNetworkDrop(id, drop);
+          break;
+        }
+      }
+    }
+  }
+
+  async autoHostCurrentWorld() {
+    if (!this.gameAPI?.lanHost || this.net || !this.world) return;
+    const port = clamp(Number(localStorage.getItem('voxelcraft:lanPort')) || 25565, 1024, 65535);
+    this.net = { role: 'host', id: 'host', name: this.netName, port };
+    this.remotePlayers.clear();
+    this.clearRemotePlayers();
+    this.configureDropsNetwork();
+    try {
+      const info = await this.gameAPI.lanHost(port);
+      this.net.port = info?.port ?? port;
+      this.broadcastNetworkState();
+      this.hud.toast(`Онлайн · подключайтесь на порт ${this.net.port}`, 4200);
+    } catch (error) {
+      this.net = null;
+      this.configureDropsNetwork();
+      this.hud.toast(`Не удалось включить сеть: ${error.message}`, 4200);
+    }
+    this.updatePlayerList();
+  }
+
+  updatePlayerList() {
+    if (!this.hud || !this.player) return;
+    const entries = [{
+      name: this.net?.name ?? this.netName,
+      health: Math.max(0, Math.round(this.player.health)),
+      self: true,
+    }];
+    for (const player of this.remotePlayers.values()) {
+      entries.push({
+        name: player.name || 'Игрок',
+        health: Math.max(0, Math.round(player.health ?? 20)),
+        self: false,
+      });
+    }
+    const header = this.net?.role === 'host'
+      ? `Онлайн · порт ${this.net.port ?? '—'}`
+      : this.net?.role === 'client' ? 'Онлайн · LAN' : 'Онлайн';
+    this.hud.setPlayerList(entries, header);
+  }
+
+  getAttackDamage() {
+    const heldId = this.inventory?.selectedStack?.id ?? null;
+    const tool = getToolInfo(heldId);
+    let damage = 1;
+    if (tool?.type === 'sword') damage = 3 + (tool.tier ?? 1);
+    else if (tool?.type === 'axe') damage = 2 + (tool.tier ?? 1) * 0.6;
+    else if (tool) damage = 1 + (tool.tier ?? 1) * 0.25;
+    if (this.isCreative()) damage = Math.max(damage, 10);
+    return damage;
+  }
+
+  pickRemotePlayer() {
+    if (!this.net || !this.player || !this.remotePlayers.size) return null;
+    const eye = this.player.eyePosition;
+    const direction = this.player.getDirection();
+    const ray = new THREE.Ray(eye, direction);
+    let best = null;
+    let bestDistance = 4.5;
+    for (const [id, player] of this.remotePlayers) {
+      if ((player.health ?? 20) <= 0) continue;
+      const center = new THREE.Vector3(player.x, player.y + 1.02, player.z);
+      const along = center.clone().sub(eye).dot(direction);
+      if (along <= 0 || along > bestDistance) continue;
+      if (ray.distanceSqToPoint(center) > 0.55 * 0.55) continue;
+      best = { id, player, distance: along };
+      bestDistance = along;
+    }
+    if (!best) return null;
+    const block = this.player.raycast(this.world);
+    if (block && block.distance < best.distance) return null;
+    return best;
+  }
+
+  tryAttackPlayer() {
+    const hit = this.pickRemotePlayer();
+    if (!hit) return false;
+    this.attackCooldown = 0.45;
+    const damage = this.getAttackDamage();
+    if (this.net.role === 'host') {
+      this.applyPlayerHit(hit.id, damage, this.net.id, this.net.name);
+    } else {
+      this.gameAPI?.lanSend?.({ type: 'attack', target: hit.id, damage });
+    }
+    this.audio.playClick();
+    return true;
+  }
+
+  applyPlayerHit(targetId, damage, attackerId, attackerName) {
+    if (!this.net || !targetId) return;
+    const amount = clamp(Number(damage) || 1, 0, 100);
+    const message = {
+      type: 'player-hit',
+      target: targetId,
+      damage: amount,
+      attacker: attackerId,
+      attackerName: attackerName || 'Игрок',
+    };
+    if (targetId === this.net.id) {
+      if (attackerId !== this.net.id && this.player && !this.player.dead) {
+        this.player.damage(amount, `игрок ${message.attackerName}`, true);
+        this.hud.flashDamage();
+        this.audio.playHurt();
+      }
+    } else {
+      const remote = this.remotePlayers.get(targetId);
+      if (remote) remote.health = Math.max(0, (remote.health ?? 20) - amount);
+    }
+    if (this.net.role === 'host') {
+      this.gameAPI?.lanSend?.(message);
+      const remote = this.remotePlayers.get(targetId);
+      if ((targetId === this.net.id && this.player?.dead)
+        || (remote && (remote.health ?? 20) <= 0)) {
+        this.gameAPI?.lanSend?.({
+          type: 'player-death', target: targetId, killer: message.attackerName,
+        });
+      }
+    }
+    this.updatePlayerList();
   }
 
   openNewWorld() {
@@ -1414,9 +1728,11 @@ export class Game {
       // Fluid levels reference blocks inside chunks that may not be loaded yet,
       // so the saved state is applied when the initial area is ready.
       this.pendingFluids = Array.isArray(loadedSave?.fluids) ? loadedSave.fluids : null;
+      this.pendingDrops = Array.isArray(loadedSave?.drops) ? loadedSave.drops : null;
 
       this.sky = new Sky(this.scene);
       this.drops = new ItemDrops(this.scene, this.world, this.assets, this.audio);
+      this.configureDropsNetwork();
       this.entities = new EntityManager({
         scene: this.scene,
         world: this.world,
@@ -1608,6 +1924,10 @@ export class Game {
       this.fluids?.load(this.pendingFluids);
       this.pendingFluids = null;
     }
+    if (info.mode === 'initial' && this.pendingDrops) {
+      this.drops?.applyState(this.pendingDrops);
+      this.pendingDrops = null;
+    }
 
     this.loadingInfo = null;
     this.lastHealth = this.player.health;
@@ -1636,6 +1956,11 @@ export class Game {
     this.updateHud(1, true);
     this.requestLockWithHint();
     this.afterNetworkReady();
+    if (!this.net && info.mode === 'initial' && this.gameAPI?.lanHost) {
+      // Every world is online: a fresh singleplayer world also hosts a LAN server.
+      this.runSafely(this.autoHostCurrentWorld());
+    }
+    this.updatePlayerList();
 
     if (info.mode === 'respawn') {
       this.hud.setBreakProgress(0);
@@ -1674,6 +1999,7 @@ export class Game {
       this.fluids = null;
     }
     this.pendingFluids = null;
+    this.pendingDrops = null;
     if (this.world) {
       this.world.dispose();
       this.world = null;
@@ -1848,6 +2174,48 @@ export class Game {
     this.requestLockWithHint();
   }
 
+  openTrade(entity) {
+    if (this.state !== 'playing' || !entity || !this.inventory) return;
+    this.resetMining();
+    this.input.enabled = false;
+    this.input.clearMouseButtons();
+    this.input.exitLock();
+    this.tradeEntity = entity;
+    this.tradeOffers = offersForVillager(entity);
+    this.setState('trade');
+    this.tradeUI.open(entity.name || 'Житель', this.tradeOffers, this.inventory);
+    this.audio.playClick();
+  }
+
+  closeTrade() {
+    if (this.state !== 'trade') return;
+    this.tradeUI.close();
+    this.tradeEntity = null;
+    this.tradeOffers = [];
+    this.setState('playing');
+    this.input.enabled = true;
+    this.input.clearMouseButtons();
+    this.requestLockWithHint();
+  }
+
+  executeTrade(offer) {
+    if (!this.inventory || !this.tradeEntity || this.state !== 'trade') return false;
+    const result = performTrade(this.inventory, offer);
+    if (result === false) {
+      this.hud.toast('Не хватает предметов для обмена');
+      return false;
+    }
+    if (result) {
+      const p = this.player.position;
+      this.drops?.spawnStack(result, p.x, p.y + 1, p.z, 0.6);
+    }
+    this.audio.playClick();
+    this.hud.toast('Обмен выполнен');
+    this.onInventoryChanged();
+    this.tradeUI.render();
+    return true;
+  }
+
   enterDeathState(dropItems) {
     if (this.state === 'dead' || !this.world || !this.player) return;
     this.resetMining();
@@ -1906,6 +2274,14 @@ export class Game {
     if (code === 'F5') {
       event.preventDefault();
       this.cycleCameraMode();
+      return;
+    }
+
+    if (this.state === 'trade') {
+      if (code === 'KeyE' || code === 'Escape') {
+        event.preventDefault();
+        this.closeTrade();
+      }
       return;
     }
 
@@ -2019,7 +2395,7 @@ export class Game {
 
     if (!this.world || !this.player || !this.inventory) return;
 
-    if (this.state === 'playing' || this.state === 'inventory' || this.state === 'loading') {
+    if (this.state === 'playing' || this.state === 'inventory' || this.state === 'trade' || this.state === 'loading') {
       this.world.update(dt, this.player.position);
     }
 
@@ -2029,9 +2405,12 @@ export class Game {
       this.updatePlaying(dt);
     } else if (this.state === 'inventory') {
       this.updateHud(dt);
+      this.inventoryUI.tickPreview(dt);
+    } else if (this.state === 'trade') {
+      this.updateHud(dt);
     }
 
-    const active = this.state === 'playing' || this.state === 'inventory' || this.state === 'loading';
+    const active = this.state === 'playing' || this.state === 'inventory' || this.state === 'trade' || this.state === 'loading';
     this.updateEnvironment(active ? dt : 0);
     this.renderer.render(this.scene, this.camera);
   }
@@ -2097,6 +2476,7 @@ export class Game {
       this.onInventoryChanged();
       if (this.inventoryUI.isOpen()) this.inventoryUI.render();
     }
+    this.updateNetworkDrops();
 
     if (this.riding) {
       // Mounted players steer the animal instead of mining or placing blocks.
@@ -2250,6 +2630,18 @@ export class Game {
       }
       if (targetBlock.interactive === 'bed') {
         this.sleepInBed(target);
+        return;
+      }
+    }
+
+    if (!this.player.sneaking) {
+      const villager = this.entities?.pick(
+        this.player.eyePosition,
+        this.player.getDirection(),
+        4.5,
+      )?.entity;
+      if (villager?.kind === 'villager') {
+        this.openTrade(villager);
         return;
       }
     }
@@ -2497,6 +2889,7 @@ export class Game {
 
   tryAttack() {
     if (!this.entities || this.attackCooldown > 0 || this.riding) return false;
+    if (this.tryAttackPlayer()) return true;
     const hit = this.entities.pick(this.player.eyePosition, this.player.getDirection(), 4.5);
     if (!hit) return false;
     const block = this.player.raycast(this.world);
@@ -2505,11 +2898,7 @@ export class Game {
 
     const heldId = this.inventory.selectedStack?.id ?? null;
     const tool = getToolInfo(heldId);
-    let damage = 1;
-    if (tool?.type === 'sword') damage = 3 + (tool.tier ?? 1);
-    else if (tool?.type === 'axe') damage = 2 + (tool.tier ?? 1) * 0.6;
-    else if (tool) damage = 1 + (tool.tier ?? 1) * 0.25;
-    if (this.isCreative()) damage = Math.max(damage, 10);
+    const damage = this.getAttackDamage();
 
     const died = this.entities.attack(hit.entity, damage, this.player, tool);
     this.audio.playClick();

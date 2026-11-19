@@ -173,6 +173,11 @@
         <div id="coords-label" class="coords-label">X 0  Y 64  Z 0</div>
       </div>
 
+      <div id="player-list" class="player-list hidden">
+        <div id="player-list-header" class="player-list-header">Онлайн</div>
+        <div id="player-list-items" class="player-list-items"></div>
+      </div>
+
       <div id="toast" class="toast hidden"></div>
       <div id="underwater-overlay" class="underwater-overlay hidden"></div>
       <div id="damage-overlay" class="damage-overlay hidden"></div>
@@ -200,6 +205,7 @@
           <button id="btn-inventory-close" class="icon-button" title="Закрыть (E)">×</button>
         </div>
         <div class="inventory-body">
+          <div id="character-preview" class="character-preview" title="Ваш персонаж и надет броня"></div>
           <div class="crafting-area">
             <div id="crafting-grid" class="crafting-grid"></div>
             <div class="craft-arrow">➜</div>
@@ -234,6 +240,21 @@
       </div>
       <div id="cursor-stack" class="cursor-stack hidden"></div>
       <div id="item-tooltip" class="item-tooltip hidden"></div>
+    </section>
+
+    <!-- Villager trading -->
+    <section id="trade-screen" class="screen modal-screen trade-screen hidden">
+      <div class="modal-card trade-card">
+        <div class="trade-head">
+          <div>
+            <h2 id="trade-title">Торговля</h2>
+            <p id="trade-subtitle">Нажми на предложение, чтобы обменять предметы.</p>
+          </div>
+          <button id="btn-trade-close" class="icon-button" title="Закрыть (E)">×</button>
+        </div>
+        <div id="trade-offers" class="trade-offers"></div>
+        <div class="trade-tip">Серые предложения — не хватает предметов. Закрытие: E или Esc.</div>
+      </div>
     </section>
 
     <!-- Pause -->

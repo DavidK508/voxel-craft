@@ -1691,3 +1691,180 @@ input {
     height: 38px;
   }
 }
+
+/* ---------- Online player list ---------- */
+
+.player-list {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  min-width: 172px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  background: rgba(8, 12, 16, 0.62);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: #f2efe4;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.player-list-header {
+  margin-bottom: 5px;
+  color: #9ee08a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.player-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  white-space: nowrap;
+}
+
+.player-list-row.self {
+  color: #9fd0ec;
+}
+
+.player-list-row.dead {
+  color: #a3a3a3;
+  text-decoration: line-through;
+}
+
+.player-health {
+  color: #e88b7a;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Character preview in inventory ---------- */
+
+.character-preview {
+  width: 132px;
+  height: 190px;
+  flex: 0 0 132px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(120, 150, 180, 0.22), transparent 65%),
+    rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.character-preview-canvas {
+  display: block;
+  width: 132px;
+  height: 190px;
+}
+
+/* ---------- Villager trading ---------- */
+
+.trade-card {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.trade-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.trade-head h2 {
+  margin: 0;
+  font-family: 'Arial Black', Impact, sans-serif;
+  font-size: 23px;
+}
+
+.trade-head p {
+  margin: 5px 0 0;
+  color: #9ba4ab;
+  font-size: 12px;
+}
+
+.trade-offers {
+  display: grid;
+  gap: 7px;
+}
+
+.trade-offer {
+  display: grid;
+  grid-template-columns: 1fr 34px 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #5c6670;
+  border-radius: 3px;
+  background: rgba(45, 52, 60, 0.92);
+  color: #f2efe4;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trade-offer:hover {
+  border-color: #9fd0ec;
+  background: rgba(60, 70, 80, 0.96);
+}
+
+.trade-offer.unavailable {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.trade-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.trade-side .item-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid #6f6550;
+  border-radius: 2px;
+  background-color: #22262b;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  image-rendering: pixelated;
+}
+
+.trade-get {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.trade-arrow {
+  color: #9ee08a;
+  font-size: 20px;
+  text-align: center;
+}
+
+.trade-tip {
+  margin-top: 12px;
+  color: #7e888f;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 780px) {
+  .character-preview {
+    display: none;
+  }
+
+  .player-list {
+    top: 8px;
+    left: 8px;
+    min-width: 140px;
+    font-size: 11px;
+  }
+}

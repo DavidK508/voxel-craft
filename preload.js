@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('gameAPI', {
   lanJoin: (address, port) => ipcRenderer.invoke('lan:join', address, port),
   lanLeave: () => ipcRenderer.send('lan:leave'),
   lanSend: (payload) => ipcRenderer.send('lan:send', payload),
+  lanSendTo: (clientId, payload) => ipcRenderer.send('lan:send-to', clientId, payload),
   onLanEvent: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('lan:event', handler);
