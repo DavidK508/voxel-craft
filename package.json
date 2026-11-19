@@ -1,0 +1,62 @@
+{
+  "name": "voxelcraft",
+  "version": "1.0.0",
+  "description": "VoxelCraft — a full-featured Minecraft-like voxel sandbox built with Electron and Three.js",
+  "main": "main.js",
+  "author": {
+    "name": "VoxelCraft",
+    "email": "voxelcraft@example.com"
+  },
+  "homepage": "https://example.com/voxelcraft",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder",
+    "test": "node tests/smoke.mjs"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.voxelcraft.game",
+    "productName": "VoxelCraft",
+    "icon": "build/icon.png",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "src/**/*",
+      "node_modules/three/build/three.module.js",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Game",
+      "maintainer": "VoxelCraft <voxelcraft@example.com>",
+      "synopsis": "VoxelCraft — воксельная песочница",
+      "description": "VoxelCraft — полноценный клон Minecraft на Electron и Three.js: бесконечный мир, крафт, броня, кровати, жидкости и LAN-игра."
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.games"
+    }
+  }
+}

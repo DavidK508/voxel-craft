@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VoxelCraft</title>
+  <link rel="stylesheet" href="/src/styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/node_modules/three/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Main menu -->
+    <section id="main-menu" class="screen menu-screen">
+      <div class="menu-vignette"></div>
+      <div class="menu-content">
+        <div class="logo-wrap">
+          <div class="logo-cube" aria-hidden="true">
+            <span class="cube-top"></span>
+            <span class="cube-left"></span>
+            <span class="cube-right"></span>
+          </div>
+          <h1 class="logo">VOXEL<span>CRAFT</span></h1>
+          <p class="tagline">Бесконечный мир. Честная физика. Твой блок.</p>
+        </div>
+
+        <div class="menu-actions">
+          <button id="btn-new" class="mc-button primary">Создать новый мир</button>
+          <button id="btn-network" class="mc-button">Играть по сети</button>
+          <button id="btn-menu-settings" class="mc-button">Настройки</button>
+          <button id="btn-quit" class="mc-button">Выйти</button>
+        </div>
+
+        <div class="world-panel">
+          <div class="world-panel-head">
+            <h3>Мои миры</h3>
+            <span id="world-list-hint">Выбери мир и нажми «Играть»</span>
+          </div>
+          <div id="world-list" class="world-list">
+            <div class="world-empty">Пока нет миров. Нажми «Создать новый мир».</div>
+          </div>
+          <div class="world-panel-actions">
+            <button id="btn-play-world" class="mc-button primary" disabled>Играть</button>
+            <button id="btn-delete-world" class="mc-button danger" disabled>Удалить мир</button>
+          </div>
+        </div>
+
+        <div class="menu-footer">
+          <div class="controls-card">
+            <h3>Управление</h3>
+            <div class="controls-grid">
+              <span><kbd>W A S D</kbd> движение</span>
+              <span><kbd>Space</kbd> прыжок / плыть</span>
+              <span><kbd>Shift</kbd> красться</span>
+              <span><kbd>Ctrl</kbd> бежать</span>
+              <span><kbd>ЛКМ</kbd> ломать</span>
+              <span><kbd>ПКМ</kbd> ставить / есть</span>
+              <span><kbd>1-9</kbd> слот</span>
+              <span><kbd>E</kbd> инвентарь</span>
+              <span><kbd>F3</kbd> отладка</span>
+              <span><kbd>Esc</kbd> пауза</span>
+            </div>
+          </div>
+          <div class="version-card">
+            <span id="version-label">VoxelCraft 1.0</span>
+            <span>Electron + Three.js</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- New world dialog -->
+    <section id="new-world" class="screen modal-screen hidden">
+      <div class="modal-card">
+        <h2>Новый мир</h2>
+        <label class="field">
+          <span>Название мира</span>
+          <input id="world-name-input" type="text" maxlength="48" placeholder="Мир 1" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Сид мира</span>
+          <input id="seed-input" type="text" maxlength="32" placeholder="оставьте пустым для случайного" autocomplete="off">
+        </label>
+        <div class="field mode-field">
+          <span>Режим игры</span>
+          <div class="mode-options" role="radiogroup" aria-label="Режим игры">
+            <label class="mode-option">
+              <input type="radio" name="game-mode" value="survival" checked>
+              <span class="mode-option-title">Выживание</span>
+              <small>Здоровье, голод, добыча ресурсов и крафт.</small>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="game-mode" value="creative">
+              <span class="mode-option-title">Креатив</span>
+              <small>Полёт, бессмертие, мгновенная добыча и все блоки в каталоге.</small>
+            </label>
+          </div>
+        </div>
+        <label class="field">
+          <span>Дальность прорисовки</span>
+          <input id="render-distance" type="range" min="3" max="12" step="1" value="6">
+          <output id="render-distance-value">6 чанков</output>
+        </label>
+        <label class="field">
+          <span>Чувствительность мыши</span>
+          <input id="sensitivity" type="range" min="0.3" max="2.5" step="0.1" value="1">
+          <output id="sensitivity-value">1.0×</output>
+        </label>
+        <div class="modal-actions">
+          <button id="btn-create" class="mc-button primary">Создать и играть</button>
+          <button id="btn-new-cancel" class="mc-button">Назад</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- LAN multiplayer -->
+    <section id="network-screen" class="screen modal-screen hidden">
+      <div class="modal-card network-card">
+        <h2>Играть по сети</h2>
+        <p class="network-hint">
+          Один игрок создаёт сервер, остальные подключаются по его адресу в локальной сети.
+        </p>
+        <label class="field">
+          <span>Ваше имя</span>
+          <input id="lan-name" type="text" maxlength="32" placeholder="Игрок" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Порт</span>
+          <input id="lan-port" type="number" min="1024" max="65535" step="1" value="25565">
+        </label>
+        <div class="modal-actions">
+          <button id="btn-lan-host" class="mc-button primary">Создать сервер</button>
+        </div>
+        <div class="network-divider"><span>или подключиться</span></div>
+        <label class="field">
+          <span>Адрес сервера</span>
+          <input id="lan-address" type="text" maxlength="64" placeholder="192.168.1.10" autocomplete="off">
+        </label>
+        <div class="modal-actions">
+          <button id="btn-lan-join" class="mc-button primary">Подключиться</button>
+          <button id="btn-lan-back" class="mc-button">Назад</button>
+        </div>
+        <div id="lan-status" class="network-status">Сервер ещё не запущен.</div>
+      </div>
+    </section>
+
+    <!-- Loading -->
+    <section id="loading-screen" class="screen loading-screen hidden">
+      <div class="loading-card">
+        <div class="loading-title">Генерация мира</div>
+        <div class="loading-bar"><div id="loading-progress"></div></div>
+        <div id="loading-status" class="loading-status">Подготовка чанков…</div>
+        <div class="loading-hint">Мир состоит из чанков 16×256×16. Геометрия собирается greedy meshing в фоновых потоках.</div>
+      </div>
+    </section>
+
+    <!-- HUD -->
+    <section id="hud" class="hidden">
+      <div id="crosshair" class="crosshair"></div>
+      <div id="debug" class="debug hidden"></div>
+      <div id="break-progress" class="break-progress hidden"><div id="break-progress-fill"></div></div>
+
+      <div id="hud-top-left" class="hud-top-left">
+        <div id="biome-label" class="biome-label">Лес</div>
+        <div id="coords-label" class="coords-label">X 0  Y 64  Z 0</div>
+      </div>
+
+      <div id="toast" class="toast hidden"></div>
+      <div id="underwater-overlay" class="underwater-overlay hidden"></div>
+      <div id="damage-overlay" class="damage-overlay hidden"></div>
+
+      <div class="hud-bottom">
+        <div class="stat-row">
+          <div id="health-bar" class="stat-bar health-bar"></div>
+          <div id="air-bar" class="stat-bar air-bar hidden"></div>
+          <div id="hunger-bar" class="stat-bar hunger-bar"></div>
+        </div>
+        <div id="held-item-name" class="held-item-name hidden">Камень</div>
+        <div id="hotbar" class="hotbar"></div>
+        <div id="hint-label" class="hint-label">ЛКМ — ломать · ПКМ — ставить · E — инвентарь</div>
+      </div>
+    </section>
+
+    <!-- Inventory / crafting -->
+    <section id="inventory-screen" class="screen inventory-screen hidden">
+      <div class="inventory-panel">
+        <div class="inventory-head">
+          <div>
+            <h2 id="inventory-title">Инвентарь</h2>
+            <p id="inventory-subtitle">2×2 крафт. Открой верстак для сетки 3×3.</p>
+          </div>
+          <button id="btn-inventory-close" class="icon-button" title="Закрыть (E)">×</button>
+        </div>
+        <div class="inventory-body">
+          <div class="crafting-area">
+            <div id="crafting-grid" class="crafting-grid"></div>
+            <div class="craft-arrow">➜</div>
+            <div id="craft-result-slot" class="slot result-slot" data-craft-result="true"></div>
+          </div>
+          <div class="inventory-main">
+            <div class="armor-row">
+              <span class="armor-label">Броня</span>
+              <div id="armor-slots" class="armor-slots"></div>
+            </div>
+            <div id="inventory-grid" class="inventory-grid"></div>
+          </div>
+        </div>
+        <div id="creative-panel" class="creative-panel hidden">
+          <div class="creative-head">
+            <h3>Каталог креатива</h3>
+            <span id="creative-hint">ЛКМ — стак, ПКМ — один</span>
+          </div>
+          <div id="creative-grid" class="creative-grid"></div>
+        </div>
+        <div class="recipe-book">
+          <div class="recipe-book-head">
+            <h3>Рецепты</h3>
+            <span id="recipe-hint">Нажми на рецепт — ингредиенты разложатся в сетку</span>
+          </div>
+          <div id="recipe-list" class="recipe-list"></div>
+        </div>
+        <div class="inventory-hotbar">
+          <div id="inventory-hotbar" class="inventory-grid hotbar-grid"></div>
+        </div>
+        <div class="inventory-tip">ЛКМ — взять/положить · ПКМ — половина/один · Shift+ЛКМ — быстро переместить</div>
+      </div>
+      <div id="cursor-stack" class="cursor-stack hidden"></div>
+      <div id="item-tooltip" class="item-tooltip hidden"></div>
+    </section>
+
+    <!-- Pause -->
+    <section id="pause-screen" class="screen modal-screen pause-screen hidden">
+      <div class="modal-card pause-card">
+        <h2>Пауза</h2>
+        <div class="pause-stats" id="pause-stats"></div>
+        <div class="modal-actions vertical">
+          <button id="btn-resume" class="mc-button primary">Продолжить</button>
+          <button id="btn-save" class="mc-button">Сохранить мир</button>
+          <button id="btn-pause-settings" class="mc-button">Настройки</button>
+          <button id="btn-main-menu" class="mc-button">Выйти в главное меню</button>
+          <button id="btn-pause-quit" class="mc-button danger">Выйти из игры</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="settings-screen" class="screen modal-screen hidden">
+      <div class="modal-card settings-card">
+        <h2>Настройки</h2>
+        <label class="field">
+          <span>Дальность прорисовки</span>
+          <input id="settings-render-distance" type="range" min="3" max="12" step="1" value="6">
+          <output id="settings-render-distance-value">6 чанков</output>
+        </label>
+        <label class="field">
+          <span>Угол обзора (FOV)</span>
+          <input id="settings-fov" type="range" min="60" max="110" step="1" value="75">
+          <output id="settings-fov-value">75°</output>
+        </label>
+        <label class="field">
+          <span>Чувствительность мыши</span>
+          <input id="settings-sensitivity" type="range" min="0.3" max="2.5" step="0.1" value="1">
+          <output id="settings-sensitivity-value">1.0×</output>
+        </label>
+        <label class="field">
+          <span>Громкость</span>
+          <input id="settings-volume" type="range" min="0" max="1" step="0.05" value="0.65">
+          <output id="settings-volume-value">65%</output>
+        </label>
+        <label class="field">
+          <span>Длительность дня и ночи</span>
+          <input id="settings-cycle-length" type="range" min="1" max="60" step="1" value="10">
+          <output id="settings-cycle-length-value">10 мин день · 10 мин ночь</output>
+        </label>
+        <label class="field checkbox-field">
+          <span>Показывать FPS и отладку</span>
+          <input id="settings-debug" type="checkbox">
+        </label>
+        <div class="modal-actions">
+          <button id="btn-settings-close" class="mc-button primary">Готово</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Death -->
+    <section id="death-screen" class="screen death-screen hidden">
+      <div class="death-content">
+        <h1>Вы погибли!</h1>
+        <p id="death-cause">Мир оказался сильнее.</p>
+        <button id="btn-respawn" class="mc-button primary">Возродиться</button>
+      </div>
+    </section>
+
+    <div id="fatal-error" class="fatal-error hidden">
+      <h2>Не удалось запустить VoxelCraft</h2>
+      <pre id="fatal-error-text"></pre>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
