@@ -6,6 +6,7 @@ import {
   WORLD_HEIGHT,
 } from '../shared/constants.js';
 import { getBlock } from '../shared/blocks.js';
+import { loadAppearance, saveAppearance } from '../shared/appearance.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
 import { offersForVillager, performTrade } from '../shared/trades.js';
 import {
@@ -33,6 +34,7 @@ import { Sky } from '../render/Sky.js';
 import { HUD } from '../ui/HUD.js';
 import { InventoryUI } from '../ui/InventoryUI.js';
 import { TradeUI } from '../ui/TradeUI.js';
+import { CharacterCreator } from '../ui/CharacterCreator.js';
 import { World } from '../world/World.js';
 import { FluidSimulation } from '../world/Fluids.js';
 import {
@@ -190,9 +192,16 @@ export class Game {
       onTrade: (offer) => this.executeTrade(offer),
       onClose: () => this.closeTrade(),
     });
+    this.characterCreator = new CharacterCreator({
+      onStart: () => this.confirmCharacter(),
+      onBack: () => this.cancelCharacter(),
+    });
+    this.pendingWorldStart = null;
+    this.characterReturnState = 'menu';
     this.input = new Input(this.canvas);
 
-    this.playerModel = new PlayerModel();
+    this.appearance = loadAppearance();
+    this.playerModel = new PlayerModel('', this.appearance);
     this.playerModel.group.visible = false;
     this.scene.add(this.playerModel.group);
     // 0 = first person, 1 = third person behind, 2 = third person in front.
@@ -257,7 +266,7 @@ export class Game {
     this.netSendTimer = 0;
     this.networkClock = 0;
     this.dropsClock = 0;
-    this.netName = localStorage.getItem('voxelcraft:netName') || 'Игрок';
+    this.netName = this.appearance.name;
     this.pendingNetworkState = null;
     this.tradeEntity = null;
     this.tradeOffers = [];
@@ -271,6 +280,7 @@ export class Game {
       pause: $('pause-screen'),
       settings: $('settings-screen'),
       network: $('network-screen'),
+      character: $('character-screen'),
       trade: $('trade-screen'),
       death: $('death-screen'),
     };
@@ -299,14 +309,15 @@ export class Game {
   bindEvents() {
     $('btn-new').addEventListener('click', () => this.openNewWorld());
     $('btn-network').addEventListener('click', () => this.openNetworkScreen());
+    $('btn-character').addEventListener('click', () => this.openCharacterOnly());
     $('btn-menu-settings').addEventListener('click', () => this.openSettings('menu'));
     $('btn-quit').addEventListener('click', () => this.quitApp());
 
-    $('btn-lan-host').addEventListener('click', () => this.runSafely(this.hostLanWorld()));
-    $('btn-lan-join').addEventListener('click', () => this.runSafely(this.joinLanWorld()));
+    $('btn-lan-host').addEventListener('click', () => this.requestCharacter(() => this.hostLanWorld()));
+    $('btn-lan-join').addEventListener('click', () => this.requestCharacter(() => this.joinLanWorld()));
     $('btn-lan-back').addEventListener('click', () => this.setState('menu'));
 
-    $('btn-play-world').addEventListener('click', () => this.runSafely(this.playSelectedWorld()));
+    $('btn-play-world').addEventListener('click', () => this.requestCharacter(() => this.playSelectedWorld()));
     $('btn-delete-world').addEventListener('click', () => this.runSafely(this.deleteSelectedWorld()));
 
     const worldListEl = $('world-list');
@@ -319,16 +330,16 @@ export class Game {
       const row = event.target.closest?.('.world-row');
       if (!row) return;
       this.selectWorld(row.dataset.id);
-      this.runSafely(this.playSelectedWorld());
+      this.requestCharacter(() => this.playSelectedWorld());
     });
 
-    $('btn-create').addEventListener('click', () => this.runSafely(this.createWorldFromDialog()));
+    $('btn-create').addEventListener('click', () => this.requestCharacter(() => this.createWorldFromDialog()));
     $('btn-new-cancel').addEventListener('click', () => this.setState('menu'));
     $('seed-input').addEventListener('keydown', (event) => {
-      if (event.code === 'Enter') this.runSafely(this.createWorldFromDialog());
+      if (event.code === 'Enter') this.requestCharacter(() => this.createWorldFromDialog());
     });
     $('world-name-input').addEventListener('keydown', (event) => {
-      if (event.code === 'Enter') this.runSafely(this.createWorldFromDialog());
+      if (event.code === 'Enter') this.requestCharacter(() => this.createWorldFromDialog());
     });
 
     $('btn-resume').addEventListener('click', () => this.resume());
@@ -446,6 +457,7 @@ export class Game {
     toggleHidden(this.screens.menu, !menuVisible);
     toggleHidden(this.screens.newWorld, state !== 'new-world');
     toggleHidden(this.screens.network, state !== 'network');
+    toggleHidden(this.screens.character, state !== 'character');
     toggleHidden(this.screens.loading, state !== 'loading');
     toggleHidden(this.screens.inventory, state !== 'inventory');
     toggleHidden(this.screens.trade, state !== 'trade');
@@ -911,6 +923,7 @@ export class Game {
   readNetName() {
     const name = ($('lan-name')?.value ?? '').replace(/\s+/g, ' ').trim().slice(0, 32) || 'Игрок';
     this.netName = name;
+    this.appearance = { ...this.appearance, name };
     localStorage.setItem('voxelcraft:netName', name);
     return name;
   }
@@ -1208,6 +1221,7 @@ export class Game {
       pitch: this.player.pitch,
       health: Math.max(0, Math.round(this.player.health)),
       armor: (this.inventory?.armor ?? []).map((stack) => stack?.id ?? 0),
+      appearance: this.appearance,
     };
   }
 
@@ -1307,6 +1321,7 @@ export class Game {
       : 0;
     const player = {
       name: message.name || previous?.name || 'Игрок',
+      appearance: message.appearance ?? previous?.appearance ?? null,
       x: Number(message.x) || 0,
       y: Number(message.y) || 0,
       z: Number(message.z) || 0,
@@ -1320,6 +1335,7 @@ export class Game {
     this.remotePlayers.set(message.id, player);
     const model = this.ensureRemotePlayer(message.id, player.name);
     if (!model) return;
+    if (player.appearance) model.setAppearance(player.appearance);
     if (Array.isArray(message.armor)) {
       model.setArmor(message.armor.map((id) => (
         id ? { material: getItem(Number(id))?.iconMaterial } : null
@@ -1561,6 +1577,47 @@ export class Game {
       }
     }
     this.updatePlayerList();
+  }
+
+  /** Opens the character editor from the menu without starting a world. */
+  openCharacterOnly() {
+    if (this.world) return;
+    this.pendingWorldStart = null;
+    this.characterReturnState = 'menu';
+    if ($('btn-character-continue')) $('btn-character-continue').textContent = 'Сохранить';
+    this.characterCreator.open(this.appearance);
+    this.setState('character');
+  }
+
+  /** Every world/LAN start goes through the character screen first. */
+  requestCharacter(start) {
+    if (this.state === 'loading') return;
+    this.pendingWorldStart = start;
+    this.characterReturnState = ['new-world', 'network'].includes(this.state) ? this.state : 'menu';
+    if ($('btn-character-continue')) $('btn-character-continue').textContent = 'В мир';
+    this.characterCreator.open(this.appearance);
+    this.setState('character');
+  }
+
+  confirmCharacter() {
+    const appearance = saveAppearance(this.characterCreator.current());
+    this.appearance = appearance;
+    this.netName = appearance.name;
+    if ($('lan-name')) $('lan-name').value = this.netName;
+    this.playerModel.setAppearance(appearance);
+    this.inventoryUI?.preview?.setAppearance(appearance);
+    this.characterCreator.close();
+
+    const start = this.pendingWorldStart;
+    this.pendingWorldStart = null;
+    if (start) this.runSafely(start());
+    else this.setState(this.characterReturnState);
+  }
+
+  cancelCharacter() {
+    this.characterCreator.close();
+    this.pendingWorldStart = null;
+    this.setState(this.characterReturnState);
   }
 
   openNewWorld() {
@@ -2305,6 +2362,14 @@ export class Game {
       if (code === 'Escape') {
         event.preventDefault();
         this.closeSettings();
+      }
+      return;
+    }
+
+    if (this.state === 'character') {
+      if (code === 'Escape') {
+        event.preventDefault();
+        this.cancelCharacter();
       }
       return;
     }

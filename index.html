@@ -35,6 +35,7 @@
         <div class="menu-actions">
           <button id="btn-new" class="mc-button primary">Создать новый мир</button>
           <button id="btn-network" class="mc-button">Играть по сети</button>
+          <button id="btn-character" class="mc-button">Персонаж</button>
           <button id="btn-menu-settings" class="mc-button">Настройки</button>
           <button id="btn-quit" class="mc-button">Выйти</button>
         </div>
@@ -117,6 +118,43 @@
         <div class="modal-actions">
           <button id="btn-create" class="mc-button primary">Создать и играть</button>
           <button id="btn-new-cancel" class="mc-button">Назад</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Character creator, shown before a world starts -->
+    <section id="character-screen" class="screen modal-screen hidden">
+      <div class="modal-card character-card">
+        <h2>Твой персонаж</h2>
+        <p class="character-hint">Имя и внешность увидят другие игроки в сети.</p>
+        <div class="character-layout">
+          <div id="character-create-preview" class="character-create-preview" title="Предпросмотр персонажа"></div>
+          <div class="character-options">
+            <label class="field">
+              <span>Имя</span>
+              <input id="character-name" type="text" maxlength="32" placeholder="Игрок" autocomplete="off">
+            </label>
+            <div class="field">
+              <span>Одежда</span>
+              <div id="character-outfits" class="appearance-options"></div>
+            </div>
+            <div class="field">
+              <span>Внешность</span>
+              <div id="character-skins" class="appearance-options"></div>
+            </div>
+            <div class="field">
+              <span>Стрижка</span>
+              <div id="character-hairstyles" class="appearance-options"></div>
+            </div>
+            <div class="field">
+              <span>Цвет волос</span>
+              <div id="character-hair-colors" class="appearance-options"></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="btn-character-continue" class="mc-button primary">В мир</button>
+          <button id="btn-character-back" class="mc-button">Назад</button>
         </div>
       </div>
     </section>

@@ -1761,6 +1761,99 @@ input {
   height: 190px;
 }
 
+/* ---------- Character creator ---------- */
+
+.character-card {
+  width: min(740px, calc(100vw - 32px));
+}
+
+.character-hint {
+  margin: -8px 0 16px;
+  color: #9ba4ab;
+  font-size: 12px;
+}
+
+.character-layout {
+  display: grid;
+  grid-template-columns: 152px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.character-create-preview {
+  width: 152px;
+  height: 230px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(120, 150, 180, 0.24), transparent 65%),
+    rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.character-create-preview .character-preview-canvas {
+  width: 152px;
+  height: 230px;
+}
+
+.character-options {
+  max-height: min(62vh, 470px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.character-options .field {
+  grid-template-columns: 1fr;
+  margin-bottom: 12px;
+}
+
+.appearance-options {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.appearance-swatch,
+.appearance-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid #5c6670;
+  border-radius: 3px;
+  background: rgba(30, 35, 40, 0.9);
+  color: #d7dde2;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.appearance-swatch:hover,
+.appearance-chip:hover {
+  border-color: #9fd0ec;
+}
+
+.appearance-swatch.selected,
+.appearance-chip.selected {
+  border-color: var(--gold);
+  background: rgba(120, 96, 42, 0.55);
+  color: #fff6d8;
+}
+
+.appearance-swatch-color {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  border-radius: 2px;
+}
+
+.appearance-swatch-label {
+  white-space: nowrap;
+}
+
 /* ---------- Villager trading ---------- */
 
 .trade-card {
@@ -1859,6 +1952,14 @@ input {
 @media (max-width: 780px) {
   .character-preview {
     display: none;
+  }
+
+  .character-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .character-create-preview {
+    margin: 0 auto;
   }
 
   .player-list {

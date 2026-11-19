@@ -4,7 +4,7 @@ import { PlayerModel } from '../player/PlayerModel.js';
 
 /** A small live 3D mannequin shown next to the armor slots. */
 export class CharacterPreview {
-  constructor(container) {
+  constructor(container, appearance = null) {
     this.container = container;
     if (!container) return;
 
@@ -20,7 +20,7 @@ export class CharacterPreview {
     this.camera.position.set(0, 1.12, 3.35);
     this.camera.lookAt(0, 1.02, 0);
 
-    this.model = new PlayerModel('');
+    this.model = new PlayerModel('', appearance);
     this.model.setVisible(true);
     this.model.nameTag.visible = false;
     this.scene.add(this.model.group);
@@ -34,6 +34,10 @@ export class CharacterPreview {
       this.tick(dt);
       this.raf = requestAnimationFrame(this.frame);
     };
+  }
+
+  setAppearance(appearance) {
+    this.model?.setAppearance(appearance);
   }
 
   setArmor(stacks) {
