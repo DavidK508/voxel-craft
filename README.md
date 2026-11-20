@@ -2,9 +2,18 @@
 
 Воксельная песочница в стиле Minecraft на Electron + Three.js: бесконечный мир, крафт, мобы, режимы выживания/креатива, текучие жидкости и LAN-игра.
 
+- **Версия:** 1.1.0
 - **Запуск:** `npm start`
 - **Тесты:** `npm test` → 29/29
-- **Сборка:** `npm run dist` → `dist/*.deb` и `dist/*.AppImage` (без `libfuse2`: `--appimage-extract-and-run`)
+- **Сборка:** `npm run dist` → пакеты в `dist/` (список ниже); `dist/` игнорируется git
+- **AppImage без `libfuse2`:** `./dist/VoxelCraft-1.1.0.AppImage --appimage-extract-and-run`
+
+### Форматы сборки
+
+- **Linux:** `deb`, `AppImage`, `rpm`, `pacman`, `apk`, `freebsd`, `tar.gz`, `tar.xz`, `zip`, `7z`
+- **Windows:** NSIS-установщик `VoxelCraft Setup 1.1.0.exe`
+- `p5p` не поддерживается: для него нужна утилита `pkgsend` из Solaris/IPS, это не Linux-формат.
+- Для `rpm`, `pacman`, `apk` и `freebsd` нужны соответствующие утилиты (`rpmbuild`, `bsdtar` и т.п.); `electron-builder` запускает их через `fpm`.
 
 ## История изменений (кратко)
 
@@ -68,3 +77,17 @@
 - Размер слотов инвентаря/верстака считается от размеров окна (`fitInventory()`), панель и книги рецептов масштабируются через `dvh`; на узких экранах раскладка становится одной колонкой.
 - Все 19 мобов и игрок экспортированы из Blender в `assets/models/*.glb` (`tools/generate_models.py`) и загружаются через `GLTFLoader`.
 - Именованные пустышки в GLB (`head`, `leg_0`, `wing_0`, `rod_0`) используются как шарниры анимации; процедурные модели остаются запасным вариантом.
+
+### Сессия 10 — релизные пакеты 1.1.0
+
+- Версия приложения повышена до `1.1.0` в `package.json`, `package-lock.json` и `index.html`.
+- Добавлены Linux-цели `rpm`, `pacman`, `apk`, `freebsd`, `tar.gz`, `tar.xz`, `zip`, `7z` наряду с `deb` и `AppImage`.
+- Удалён поддерживающийся только в Solaris `p5p`: его сборка требовала `pkgsend` и ломала полный `npm run dist`.
+- Добавлен Windows NSIS-установщик; вместе с ним генерируются `latest.yml` и `.exe.blockmap`.
+- Все пакеты пересобраны с финальной версией исходников и проверены по целостности.
+
+### Сессия 11 — исправление packaged-сборки
+
+- Найдена причина «не работают кнопки» в установленном `deb`: `GLTFLoader` из `three/examples/jsm` не попадал в packaged-приложение, поэтому модуль `src/main.js` не выполнялся и обработчики UI не вешались.
+- Загрузчик и его зависимости (`GLTFLoader`, `BufferGeometryUtils`, `SkeletonUtils`) добавлены в `src/vendor/three/`; импорт в `src/entities/modelLoader.js` теперь локальный.
+- Запуск через `.desktop` проверен: главное меню открывается, кнопки переводят между экранами. Все Linux-пакеты и `.exe` пересобраны с этим исправлением.
