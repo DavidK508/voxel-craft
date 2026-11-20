@@ -743,6 +743,178 @@ const PAINTERS = {
     sprinkle(ctx, rng, 18, [30, 150, 78], 255, 2);
     sprinkle(ctx, rng, 10, [120, 246, 168], 255, 1);
   },
+  torch_stick: (ctx) => {
+    for (let y = 5; y < 16; y++) {
+      pixel(ctx, 7, y, 104, 68, 38);
+      pixel(ctx, 8, y, 142, 98, 55);
+    }
+  },
+  torch_flame: (ctx) => {
+    const flame = [
+      [7, 1, 255, 244, 176], [8, 1, 255, 226, 120],
+      [6, 2, 255, 186, 46], [7, 2, 255, 250, 208], [8, 2, 255, 222, 96], [9, 2, 246, 150, 32],
+      [6, 3, 238, 128, 22], [7, 3, 255, 206, 72], [8, 3, 255, 186, 48], [9, 3, 226, 110, 20],
+      [7, 4, 208, 84, 16], [8, 4, 236, 128, 26],
+    ];
+    for (const [x, y, r, g, b] of flame) pixel(ctx, x, y, r, g, b);
+  },
+
+  // The two halves share one continuous panel, so neither tile draws a
+  // horizontal frame at its own top/bottom edge — that made a 2-block door
+  // look like two separate square doors stacked on each other.
+  door_top: (ctx, rng) => {
+    fillNoise(ctx, [150, 103, 58], 8, rng);
+    for (const x of [2, 7, 12]) {
+      for (let y = 0; y < SIZE; y++) {
+        pixel(ctx, x, y, 96, 62, 34);
+        pixel(ctx, x + 1, y, 178, 128, 75);
+      }
+    }
+  },
+  door_bottom: (ctx, rng) => {
+    fillNoise(ctx, [150, 103, 58], 8, rng);
+    for (const x of [2, 7, 12]) {
+      for (let y = 0; y < SIZE; y++) {
+        pixel(ctx, x, y, 96, 62, 34);
+        pixel(ctx, x + 1, y, 178, 128, 75);
+      }
+    }
+    for (let y = 6; y < 10; y++) pixel(ctx, 13, y, 232, 196, 82);
+  },
+
+  lever_off: (ctx) => {
+    for (let x = 5; x <= 10; x++) {
+      for (let y = 11; y <= 14; y++) pixel(ctx, x, y, 96, 96, 102);
+    }
+    for (let i = 0; i < 7; i++) pixel(ctx, 7 + i, 12 - i, 152, 104, 58);
+    pixel(ctx, 6, 12, 206, 58, 48);
+  },
+  lever_on: (ctx) => {
+    for (let x = 5; x <= 10; x++) {
+      for (let y = 11; y <= 14; y++) pixel(ctx, x, y, 96, 96, 102);
+    }
+    for (let i = 0; i < 7; i++) pixel(ctx, 7 + i, 4 + i, 152, 104, 58);
+    pixel(ctx, 6, 4, 255, 96, 64);
+  },
+
+  button_off: (ctx) => {
+    for (let y = 5; y <= 10; y++) {
+      for (let x = 5; x <= 10; x++) pixel(ctx, x, y, x === 5 || y === 5 ? 150 : 110, 110, 110);
+    }
+    pixel(ctx, 7, 7, 196, 62, 52);
+  },
+  button_on: (ctx) => {
+    for (let y = 6; y <= 9; y++) {
+      for (let x = 6; x <= 9; x++) pixel(ctx, x, y, 160, 160, 166);
+    }
+    pixel(ctx, 7, 7, 255, 112, 80);
+  },
+
+  plate_off: (ctx) => {
+    for (let y = 3; y <= 12; y++) {
+      for (let x = 3; x <= 12; x++) {
+        const edge = x === 3 || x === 12 || y === 3 || y === 12;
+        pixel(ctx, x, y, edge ? 102 : 136, edge ? 102 : 136, edge ? 108 : 142);
+      }
+    }
+  },
+  plate_on: (ctx) => {
+    for (let y = 4; y <= 11; y++) {
+      for (let x = 4; x <= 11; x++) pixel(ctx, x, y, 174, 174, 180);
+    }
+    pixel(ctx, 7, 7, 255, 108, 72);
+  },
+
+  wire_off: (ctx) => {
+    for (let i = 0; i < SIZE; i++) {
+      for (const d of [7, 8]) {
+        pixel(ctx, i, d, 88, 26, 26);
+        pixel(ctx, d, i, 88, 26, 26);
+      }
+    }
+    pixel(ctx, 7, 7, 124, 40, 40);
+  },
+  wire_on: (ctx) => {
+    for (let i = 0; i < SIZE; i++) {
+      for (const d of [7, 8]) {
+        pixel(ctx, i, d, 226, 44, 44);
+        pixel(ctx, d, i, 226, 44, 44);
+      }
+    }
+    pixel(ctx, 7, 7, 255, 132, 110);
+    pixel(ctx, 8, 8, 255, 96, 80);
+  },
+
+  repeater_off: (ctx, rng) => {
+    fillNoise(ctx, [86, 82, 88], 8, rng);
+    for (let x = 3; x <= 12; x++) {
+      for (let y = 4; y <= 11; y++) pixel(ctx, x, y, 118, 114, 120);
+    }
+    pixel(ctx, 5, 8, 196, 62, 52);
+    pixel(ctx, 10, 8, 92, 34, 34);
+  },
+  repeater_on: (ctx, rng) => {
+    fillNoise(ctx, [86, 82, 88], 8, rng);
+    for (let x = 3; x <= 12; x++) {
+      for (let y = 4; y <= 11; y++) pixel(ctx, x, y, 132, 126, 132);
+    }
+    pixel(ctx, 5, 8, 255, 116, 78);
+    pixel(ctx, 10, 8, 255, 68, 52);
+  },
+
+  piston_side: (ctx, rng) => {
+    fillNoise(ctx, [126, 92, 58], 8, rng);
+    for (let y = 3; y < 13; y++) {
+      pixel(ctx, 3, y, 158, 158, 164);
+      pixel(ctx, 12, y, 158, 158, 164);
+    }
+    pixel(ctx, 8, 8, 92, 92, 98);
+  },
+  piston_top: (ctx, rng) => {
+    fillNoise(ctx, [150, 106, 64], 8, rng);
+    for (let i = 2; i < 14; i++) pixel(ctx, i, 2, 106, 74, 42);
+  },
+  piston_front: (ctx, rng) => {
+    fillNoise(ctx, [96, 96, 102], 8, rng);
+    for (let y = 4; y < 12; y++) {
+      for (let x = 4; x < 12; x++) pixel(ctx, x, y, 140, 140, 146);
+    }
+    pixel(ctx, 8, 8, 208, 62, 52);
+  },
+  piston_head_side: (ctx, rng) => {
+    fillNoise(ctx, [142, 142, 148], 8, rng);
+    for (let y = 2; y < 14; y++) pixel(ctx, 12, y, 96, 96, 102);
+  },
+  piston_head_top: (ctx, rng) => {
+    fillNoise(ctx, [168, 168, 174], 8, rng);
+    for (let i = 2; i < 14; i++) pixel(ctx, i, 8, 192, 68, 56);
+  },
+
+  lamp_off: (ctx, rng) => {
+    fillNoise(ctx, [82, 82, 88], 8, rng);
+    for (let y = 4; y < 12; y++) {
+      for (let x = 4; x < 12; x++) pixel(ctx, x, y, 126, 120, 72);
+    }
+  },
+  lamp_on: (ctx, rng) => {
+    fillNoise(ctx, [92, 92, 98], 8, rng);
+    for (let y = 3; y < 13; y++) {
+      for (let x = 3; x < 13; x++) pixel(ctx, x, y, 255, 232, 156);
+    }
+    for (const [x, y] of [[6, 6], [10, 7], [7, 10]]) pixel(ctx, x, y, 255, 255, 226);
+  },
+  redstone_block: (ctx, rng) => {
+    fillNoise(ctx, [178, 34, 34], 10, rng);
+    for (let y = 0; y < SIZE; y += 4) {
+      for (let x = 0; x < SIZE; x += 4) pixel(ctx, x, y, 226, 66, 60);
+    }
+    sprinkle(ctx, rng, 24, [255, 108, 92], 255, 1);
+  },
+  redstone_ore: (ctx, rng) => {
+    stoneBase(ctx, rng);
+    sprinkle(ctx, rng, 16, [206, 42, 42], 255, 2);
+    sprinkle(ctx, rng, 8, [255, 96, 88], 255, 1);
+  },
 };
 
 function makeCanvas(size = SIZE) {
@@ -1117,6 +1289,21 @@ function drawExtraItemIcon(ctx, key, item = null) {
     rect(4, 5, 8, 2, '#b07a42');
     setIconPixel(ctx, 5, 9, '#5c3a1a');
     setIconPixel(ctx, 10, 9, '#5c3a1a');
+  } else if (key === 'redstone') {
+    for (let y = 4; y < 13; y++) {
+      for (let x = 5; x < 12; x++) {
+        if ((x + y) % 3 === 0) continue;
+        setIconPixel(ctx, x, y, (x + y) % 2 ? '#c82424' : '#ff6a5c');
+      }
+    }
+  } else if (key === 'slime_ball') {
+    for (let y = 5; y < 12; y++) {
+      for (let x = 4; x < 13; x++) {
+        const edge = x === 4 || x === 12 || y === 5 || y === 11;
+        setIconPixel(ctx, x, y, edge ? '#4f9a45' : '#8ed46f');
+      }
+    }
+    setIconPixel(ctx, 6, 7, '#d8f5b0');
   }
 }
 
@@ -1276,7 +1463,16 @@ export function buildTextureAssets() {
   }
 
   for (const item of ITEM_LIST) {
-    if (item.icon === 'block') continue;
+    if (item.icon === 'block') {
+      // Items such as the door share a block-state id; reuse its rendered icon.
+      const source = iconCache.get(item.blockId ?? item.placeBlock);
+      if (source) {
+        iconCache.set(item.id, source);
+        const canvas = iconCanvasCache.get(item.blockId ?? item.placeBlock);
+        if (canvas) iconCanvasCache.set(item.id, canvas);
+      }
+      continue;
+    }
     const canvas = makeItemIconCanvas(item);
     iconCanvasCache.set(item.id, canvas);
     iconCache.set(item.id, iconDataUrl(canvas));

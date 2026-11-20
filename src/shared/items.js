@@ -43,6 +43,8 @@ export const ITEM_IDS = Object.freeze({
   CARROT: 445,
   POTATO: 446,
   BEETROOT: 447,
+  SLIME_BALL: 448,
+  REDSTONE: 449,
   LEATHER_HELMET: 500,
   LEATHER_CHESTPLATE: 501,
   LEATHER_LEGGINGS: 502,
@@ -185,6 +187,8 @@ const materialDefs = [
   { id: 445, key: 'carrot', name: 'Морковь', stack: 64, icon: 'carrot', food: { nutrition: 3, saturation: 1.2 } },
   { id: 446, key: 'potato', name: 'Картофель', stack: 64, icon: 'potato', food: { nutrition: 1, saturation: 0.3 } },
   { id: 447, key: 'beetroot', name: 'Свёкла', stack: 64, icon: 'beetroot', food: { nutrition: 1, saturation: 0.6 } },
+  { id: 448, key: 'slime_ball', name: 'Слизевый шарик', stack: 64, icon: 'slime_ball' },
+  { id: 449, key: 'redstone', name: 'Redstone', stack: 64, icon: 'redstone' },
 ];
 
 const itemMap = new Map();
@@ -193,6 +197,7 @@ for (const def of armorDefs) itemMap.set(def.id, Object.freeze({ ...def, armor: 
 for (const def of materialDefs) itemMap.set(def.id, Object.freeze({ ...def }));
 
 for (const block of BLOCK_DEFS) {
+  if (block.item === false) continue;
   if (block.id === 11 || block.id === 30 || block.id === 13) continue;
   itemMap.set(block.id, Object.freeze({
     id: block.id,

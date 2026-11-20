@@ -63,6 +63,17 @@ export const RECIPES = Object.freeze([
   { id: 'torch', shapeless: [{ any: [401] }, { any: [400] }], result: { id: 63, count: 4 } },
   // A bed is three wool above three planks, just like Minecraft.
   { id: 'bed', pattern: ['WWW', 'PPP'], key: { W: 42, P: 5 }, result: { id: 69, count: 1 } },
+  // Doors and Redstone mechanisms.
+  { id: 'oak_door', pattern: ['PP', 'PP', 'PP'], key: { P: 5 }, result: { id: 81, count: 1 } },
+  { id: 'lever', shapeless: [{ any: [400] }, { any: [4] }], result: { id: 97, count: 1 } },
+  { id: 'stone_button', shapeless: [{ any: [4] }], result: { id: 105, count: 1 } },
+  { id: 'pressure_plate', pattern: ['SS'], key: { S: 4 }, result: { id: 113, count: 1 } },
+  { id: 'redstone_block', pattern: ['RRR', 'RRR', 'RRR'], key: { R: 449 }, result: { id: 181, count: 1 } },
+  { id: 'redstone_from_block', shapeless: [{ any: [181] }], result: { id: 449, count: 9 } },
+  { id: 'repeater', pattern: ['R R', 'STS'], key: { R: 449, S: 4, T: 400 }, result: { id: 117, count: 1 } },
+  { id: 'redstone_lamp', shapeless: [{ any: [449] }, { any: [29] }], result: { id: 149, count: 1 } },
+  { id: 'piston', pattern: ['PPP', 'CIC', 'CRC'], key: { P: 5, C: 4, I: 403, R: 449 }, result: { id: 151, count: 1 } },
+  { id: 'sticky_piston', shapeless: [{ any: [151] }, { any: [448] }], result: { id: 169, count: 1 } },
   ...armorRecipes,
   ...toolRecipes,
 ]);

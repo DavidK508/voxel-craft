@@ -9,8 +9,23 @@ import {
   SEA_LEVEL,
   WORLD_HEIGHT,
 } from '../src/shared/constants.js';
-import { BLOCK_DEFS, getBlock, isSolid } from '../src/shared/blocks.js';
+import {
+  BLOCK_DEFS,
+  decodeState,
+  getBedId,
+  getBlock,
+  getButtonId,
+  getDoorId,
+  getDustId,
+  getLampId,
+  getLeverId,
+  getPistonId,
+  getRepeaterId,
+  getWallTorchId,
+  isSolid,
+} from '../src/shared/blocks.js';
 import { getItem, getMaxStack, createItemStack, getArmorInfo } from '../src/shared/items.js';
+import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
 import { findRecipe } from '../src/shared/recipes.js';
 import { SimplexNoise, NoiseField, mulberry32 } from '../src/shared/noise.js';
 import { Inventory } from '../src/game/Inventory.js';
@@ -41,6 +56,7 @@ import { MOBS } from '../src/entities/mobs.js';
 import { Entity } from '../src/entities/Entity.js';
 import { EntityManager } from '../src/entities/EntityManager.js';
 import { FluidSimulation } from '../src/world/Fluids.js';
+import { RedstoneSimulation } from '../src/game/Redstone.js';
 
 const results = [];
 let failed = 0;
@@ -80,6 +96,52 @@ async function test(name, fn) {
 
 const localIndex = (x, y, z) => x + (z << 4) + (y << 8);
 const padIndex = (x, y, z) => (y + 1) * PAD_X * PAD_Z + (z + 1) * PAD_X + (x + 1);
+
+/** Meshes a single block in an otherwise empty chunk and returns its bounds. */
+function meshSingleBlock(id, x = 8, y = 10, z = 8) {
+  const blocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
+  blocks[localIndex(x, y, z)] = id;
+  const mesh = meshChunk(buildPaddedVolume(blocks, () => null), 0, 0).solid;
+  assert.ok(mesh, `block ${id} should produce geometry`);
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < mesh.vertexCount; i++) {
+    for (let axis = 0; axis < 3; axis++) {
+      const value = mesh.positions[i * 3 + axis];
+      min[axis] = Math.min(min[axis], value);
+      max[axis] = Math.max(max[axis], value);
+    }
+  }
+  return { mesh, min, max, size: max.map((value, i) => value - min[i]) };
+}
+
+/** Tiny in-memory world for exercising the redstone simulation. */
+function makeRedstoneWorld() {
+  const blocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
+  return {
+    blocks,
+    chunks: new Map([['0,0', { cx: 0, cz: 0, blocks }]]),
+    getBlock(x, y, z) {
+      if (x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE || y < 0 || y >= WORLD_HEIGHT) return 0;
+      return blocks[localIndex(x, y, z)];
+    },
+    setBlock(x, y, z, id) {
+      if (x < 0 || x >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE || y < 0 || y >= WORLD_HEIGHT) return false;
+      blocks[localIndex(x, y, z)] = id;
+      return true;
+    },
+    isChunkLoadedAt(x, z) {
+      return x >= 0 && x < CHUNK_SIZE && z >= 0 && z < CHUNK_SIZE;
+    },
+  };
+}
+
+function makeRedstoneSim(world) {
+  return new RedstoneSimulation(world, {
+    getPlayer: () => ({ position: { x: 8, y: 10, z: 8 }, dead: false }),
+    getEntities: () => [],
+  });
+}
 
 function hashBlocks(blocks) {
   let hash = 2166136261;
@@ -123,7 +185,7 @@ function makeSetWorld(solids) {
 const noInput = { isDown: () => false, isMouseDown: () => false };
 
 await test('block registry is complete and immutable', () => {
-  assert.equal(BLOCK_DEFS.length, 69);
+  assert.equal(BLOCK_DEFS.length, 182);
   assert.equal(getBlock(0).key, 'air');
   assert.equal(getBlock(1).key, 'stone');
   assert.equal(getBlock(999).key, 'air');
@@ -142,13 +204,39 @@ await test('block registry is complete and immutable', () => {
   assert.equal(getBlock(67).key, 'beetroot_crop');
   assert.equal(getBlock(68).key, 'oak_fence');
   assert.equal(getBlock(68).solid, true);
-  assert.equal(getBlock(69).key, 'bed');
+  assert.equal(getBlock(69).key, 'bed_foot_0');
   assert.equal(getBlock(69).interactive, 'bed');
+  assert.equal(getBlock(69).customShape, true);
+  assert.equal(getBlock(63).customShape, true);
+  assert.equal(getBlock(81).interactive, 'door');
+  assert.equal(getBlock(149).light, 0);
+  assert.equal(getBlock(150).light, 15);
+  const ids = BLOCK_DEFS.map((block) => block.id);
+  assert.equal(new Set(ids).size, ids.length, 'block ids must be unique');
+  assert.deepEqual([...new Set(ids)].sort((a, b) => a - b),
+    Array.from({ length: BLOCK_DEFS.length }, (_, i) => i + 1),
+    'block ids must cover the whole range without gaps');
   for (const block of BLOCK_DEFS) {
     assert.ok(block.id > 0 && block.id < 256, `invalid id ${block.id}`);
     assert.equal(block.tiles.length, 6);
     assert.ok(block.name.length > 0);
   }
+});
+
+await test('Redstone states round-trip and craft', () => {
+  assert.deepEqual(decodeState(1), null);
+  assert.deepEqual(decodeState(getBedId(3, true)), { type: 'bed', facing: 3, head: true });
+  assert.deepEqual(decodeState(getDoorId(2, true, 1)), { type: 'door', facing: 2, open: true, half: 1 });
+  assert.deepEqual(decodeState(getLeverId(1, true)), { type: 'lever', facing: 1, powered: true });
+  assert.deepEqual(decodeState(getRepeaterId(0, true, 4)), { type: 'repeater', facing: 0, powered: true, delay: 4 });
+  assert.deepEqual(decodeState(getLampId(true)), { type: 'lamp', lit: true });
+  assert.deepEqual(decodeState(182), { type: 'redstone_ore' });
+
+  assert.equal(findRecipe([5, 5, null, 5, 5, null, 5, 5, null], 3).result.id, 81);
+  assert.equal(findRecipe([400, 4, null, null], 2).result.id, 97);
+  assert.equal(findRecipe([449, 449, 449, 449, 449, 449, 449, 449, 449], 3).result.id, 181);
+  assert.equal(getItem(449).key, 'redstone');
+  assert.equal(getItem(448).key, 'slime_ball');
 });
 
 await test('item registry exposes blocks, tools and food', () => {
@@ -403,8 +491,183 @@ await test('emissive blocks bake block light into the mesh', () => {
     top = Math.max(top, torch.positions[i * 3 + 1]);
     torchBrightest = Math.max(torchBrightest, torch.lights[i]);
   }
-  assert.ok(top > 11.5 && top < 11.7, `torch should be a short post, got top ${top}`);
+  // A slim post plus a small flame billboard above it.
+  assert.ok(top > 11.9 && top < 12.1, `torch should be a slim post with a flame, got top ${top}`);
   assert.equal(torchBrightest, 238, 'torch light should bake as level 14');
+});
+
+await test('decorative blocks use rectangular, non-cube geometry', () => {
+  assert.equal(TEXTURE_COUNT, 107);
+  for (const name of ['bed_top', 'bed_side', 'torch_stick', 'torch_flame', 'oak_fence',
+    'door_bottom', 'door_top', 'lever_off', 'button_off', 'plate_off', 'wire_off',
+    'repeater_off', 'piston_side', 'lamp_off', 'redstone_block', 'redstone_ore']) {
+    assert.ok(TILE[name] >= 0 && TILE[name] < TEXTURE_COUNT, `missing texture ${name}`);
+  }
+  assert.ok(TILE.bed_top > 63, 'late atlas tiles need seven mesh bits');
+
+  const torch = meshSingleBlock(63);
+  assert.ok(torch.mesh.tiles.includes(TILE.torch_flame), 'flame tile must survive mesh packing');
+  assert.ok(torch.size[0] < 0.2 && torch.size[2] < 0.2, 'torch must be a slim post');
+  assert.ok(torch.max[1] > 11 && torch.max[1] < 11.1, 'torch flame sits just above the block');
+
+  const wallTorch = meshSingleBlock(getWallTorchId(2));
+  assert.ok(wallTorch.size[1] < 0.6, 'wall torch must be horizontal, not a cube');
+  assert.ok(wallTorch.size[2] > 0.5, 'wall torch stick protrudes from the wall');
+
+  const bed = meshSingleBlock(getBedId(0, false));
+  assert.ok(bed.mesh.tiles.includes(TILE.bed_top), 'bed tile must survive mesh packing');
+  assert.ok(bed.size[1] < 0.8, `bed must stay low, got height ${bed.size[1]}`);
+  assert.ok(bed.size[0] > 0.8 && bed.size[2] > 0.8, 'bed footprint fills its cell');
+  assert.ok(bed.mesh.vertexCount / 4 > 30, 'bed needs legs, frame and mattress, not one box');
+  const head = meshSingleBlock(getBedId(0, true));
+  assert.ok(head.mesh.tiles.includes(TILE.white_wool), 'head has a separate pillow');
+  assert.ok(head.size[1] > bed.size[1], 'headboard rises above the footboard');
+
+  const fence = meshSingleBlock(68);
+  assert.ok(Math.abs(fence.size[0] - 0.25) < 1e-6, 'fence post is thin in X');
+  assert.ok(Math.abs(fence.size[2] - 0.25) < 1e-6, 'fence post is thin in Z');
+  assert.ok(fence.size[1] > 1.4, 'fence post is taller than a block');
+
+  const closed = meshSingleBlock(getDoorId(0, false, 0));
+  assert.ok(closed.size[2] < 0.25, 'closed door is a thin panel');
+  assert.ok(closed.size[1] > 0.9, 'door spans nearly a full block vertically');
+  assert.ok(Math.abs(closed.max[1] - 11) < 1e-6, 'lower half reaches the next cell');
+  const upper = meshSingleBlock(getDoorId(0, false, 1), 8, 11, 8);
+  assert.ok(Math.abs(upper.min[1] - 11) < 1e-6, 'upper half starts at the same boundary');
+  const open = meshSingleBlock(getDoorId(0, true, 0));
+  assert.ok(open.size[0] < 0.2, 'open door is a thin panel rotated onto the X axis');
+  assert.ok(open.size[2] > 0.8, 'open door swings across the whole cell');
+
+  const lever = meshSingleBlock(getLeverId(2, false));
+  assert.ok(lever.size[1] < 0.5, 'lever is a low mechanism');
+  const button = meshSingleBlock(getButtonId(2, false));
+  assert.ok(button.size[1] < 0.4, 'button is a small, flat control');
+  const wire = meshSingleBlock(getDustId(false));
+  assert.ok(wire.size[1] < 0.2, 'redstone dust is flat on the floor');
+  assert.ok(wire.size[0] > 0.9 && wire.size[2] > 0.9, 'dust crosses the cell');
+  const repeater = meshSingleBlock(getRepeaterId(0, false, 1));
+  assert.ok(repeater.size[1] < 0.4, 'repeater is a low rectangular device');
+});
+
+await test('redstone devices respond to levers, wires, repeaters and pistons', () => {
+  const world = makeRedstoneWorld();
+  const sim = makeRedstoneSim(world);
+  const set = (x, y, z, id) => world.setBlock(x, y, z, id);
+
+  // Lever -> wire -> door.
+  set(8, 10, 8, getLeverId(0, false));
+  set(8, 10, 9, getDustId(false));
+  set(8, 10, 10, getDoorId(0, false, 0));
+  set(8, 11, 10, getDoorId(0, false, 1));
+  sim.update(0.1); // establish the unpowered baseline
+  assert.equal(sim.interact(8, 10, 8), true);
+  sim.update(0.1);
+  assert.equal(sim.wirePower.get('8,10,9'), 15, 'a lever powers adjacent dust');
+  assert.equal(world.getBlock(8, 10, 10), getDoorId(0, true, 0), 'door opens on signal');
+  assert.equal(world.getBlock(8, 11, 10), getDoorId(0, true, 1), 'both door halves follow');
+
+  // Signal decays along dust, and a repeater restores it after its delay.
+  const lineWorld = makeRedstoneWorld();
+  const lineSim = makeRedstoneSim(lineWorld);
+  lineWorld.setBlock(4, 10, 4, getLeverId(0, true));
+  for (let z = 5; z <= 8; z++) lineWorld.setBlock(4, 10, z, getDustId(false));
+  lineWorld.setBlock(4, 10, 9, getRepeaterId(2, false, 1));
+  lineWorld.setBlock(4, 10, 10, getDustId(false));
+  lineWorld.setBlock(4, 10, 11, getLampId(false));
+  lineSim.update(0.1);
+  assert.equal(lineSim.wirePower.get('4,10,5'), 15);
+  assert.equal(lineSim.wirePower.get('4,10,8'), 12, 'dust loses one strength per block');
+  lineSim.update(0.2);
+  assert.equal(lineWorld.getBlock(4, 10, 9), getRepeaterId(2, true, 1), 'repeater fires after its delay');
+  lineSim.update(0.1);
+  assert.equal(lineWorld.getBlock(4, 10, 11), getLampId(true), 'repeater output lights the lamp');
+
+  // Piston pushes a block one cell forward and restores it when depowered.
+  const pistonWorld = makeRedstoneWorld();
+  const pistonSim = makeRedstoneSim(pistonWorld);
+  pistonWorld.setBlock(3, 10, 6, getLeverId(0, false));
+  pistonWorld.setBlock(4, 10, 6, getDustId(false));
+  pistonWorld.setBlock(5, 10, 6, getPistonId(1, false, false));
+  pistonWorld.setBlock(7, 10, 6, 5);
+  pistonSim.update(0.1); // establish the unpowered baseline
+  pistonWorld.setBlock(3, 10, 6, getLeverId(0, true));
+  pistonSim.update(0.1);
+  assert.equal(pistonWorld.getBlock(5, 10, 6), getPistonId(1, true, false), 'piston extends');
+  assert.equal(pistonWorld.getBlock(6, 10, 6), 163 + 1, 'piston head fills the gap');
+  assert.equal(pistonWorld.getBlock(8, 10, 6), 5, 'pushable block moves forward');
+  pistonWorld.setBlock(3, 10, 6, getLeverId(0, false));
+  pistonSim.update(0.1);
+  pistonSim.update(0.1);
+  assert.equal(pistonWorld.getBlock(5, 10, 6), getPistonId(1, false, false), 'piston retracts');
+  assert.equal(pistonWorld.getBlock(6, 10, 6), 0, 'head is removed');
+  assert.equal(pistonWorld.getBlock(7, 10, 6), 5, 'block returns to its place');
+});
+
+await test('redstone respects manual doors, direct signals and timed buttons', () => {
+  // A player-opened door stays open while the redstone signal is unchanged.
+  const world = makeRedstoneWorld();
+  const sim = makeRedstoneSim(world);
+  world.setBlock(8, 10, 5, getDoorId(0, false, 0));
+  world.setBlock(8, 11, 5, getDoorId(0, false, 1));
+  sim.update(0.1);
+  world.setBlock(8, 10, 5, getDoorId(0, true, 0));
+  world.setBlock(8, 11, 5, getDoorId(0, true, 1));
+  for (let i = 0; i < 3; i++) sim.update(0.1);
+  assert.equal(world.getBlock(8, 10, 5), getDoorId(0, true, 0), 'manual door stays open');
+
+  // A powered lever directly next to a door needs no dust.
+  const directWorld = makeRedstoneWorld();
+  const directSim = makeRedstoneSim(directWorld);
+  directWorld.setBlock(4, 10, 5, getLeverId(0, false));
+  directWorld.setBlock(4, 10, 6, getDoorId(0, false, 0));
+  directWorld.setBlock(4, 11, 6, getDoorId(0, false, 1));
+  directSim.update(0.1);
+  directWorld.setBlock(4, 10, 5, getLeverId(0, true));
+  directSim.update(0.1);
+  assert.equal(directWorld.getBlock(4, 10, 6), getDoorId(0, true, 0), 'lever opens adjacent door');
+
+  // Buttons emit a pulse and then release themselves.
+  const buttonWorld = makeRedstoneWorld();
+  const buttonSim = makeRedstoneSim(buttonWorld);
+  buttonWorld.setBlock(6, 10, 5, getButtonId(0, false));
+  assert.equal(buttonSim.interact(6, 10, 5), true);
+  assert.equal(buttonWorld.getBlock(6, 10, 5), getButtonId(0, true), 'button presses');
+  buttonSim.update(2);
+  assert.equal(buttonWorld.getBlock(6, 10, 5), getButtonId(0, false), 'button releases');
+});
+
+await test('multi-block devices remove both halves', () => {
+  const world = makeRedstoneWorld();
+  const sim = makeRedstoneSim(world);
+  const set = (x, y, z, id) => world.setBlock(x, y, z, id);
+
+  // Bed facing north: the head is one cell north of the foot.
+  set(4, 10, 5, getBedId(0, false));
+  set(4, 10, 4, getBedId(0, true));
+  sim.onBlockRemoved(4, 10, 5, getBedId(0, false));
+  assert.equal(world.getBlock(4, 10, 4), 0, 'breaking the foot removes the head');
+
+  set(4, 10, 5, getBedId(0, false));
+  set(4, 10, 4, getBedId(0, true));
+  sim.onBlockRemoved(4, 10, 4, getBedId(0, true));
+  assert.equal(world.getBlock(4, 10, 5), 0, 'breaking the head removes the foot');
+
+  // Bed facing east: the head is one cell east of the foot.
+  set(4, 10, 5, getBedId(1, false));
+  set(5, 10, 5, getBedId(1, true));
+  sim.onBlockRemoved(4, 10, 5, getBedId(1, false));
+  assert.equal(world.getBlock(5, 10, 5), 0, 'east-facing bed removes the right neighbour');
+
+  // Door halves follow each other.
+  set(8, 10, 5, getDoorId(2, false, 0));
+  set(8, 11, 5, getDoorId(2, false, 1));
+  sim.onBlockRemoved(8, 10, 5, getDoorId(2, false, 0));
+  assert.equal(world.getBlock(8, 11, 5), 0, 'breaking the door bottom removes the top');
+
+  set(8, 10, 5, getDoorId(2, false, 0));
+  set(8, 11, 5, getDoorId(2, false, 1));
+  sim.onBlockRemoved(8, 11, 5, getDoorId(2, false, 1));
+  assert.equal(world.getBlock(8, 10, 5), 0, 'breaking the door top removes the bottom');
 });
 
 await test('iron golems guard villagers', () => {

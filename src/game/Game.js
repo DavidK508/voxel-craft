@@ -5,7 +5,20 @@ import {
   SAVE_VERSION,
   WORLD_HEIGHT,
 } from '../shared/constants.js';
-import { getBlock } from '../shared/blocks.js';
+import {
+  FACING_OFFSETS,
+  decodeState,
+  facingFromNormal,
+  facingFromYaw,
+  getBedId,
+  getBlock,
+  getButtonId,
+  getDoorId,
+  getLeverId,
+  getPistonId,
+  getRepeaterId,
+  getWallTorchId,
+} from '../shared/blocks.js';
 import { loadAppearance, saveAppearance } from '../shared/appearance.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
 import { offersForVillager, performTrade } from '../shared/trades.js';
@@ -38,6 +51,7 @@ import { TradeUI } from '../ui/TradeUI.js';
 import { CharacterCreator } from '../ui/CharacterCreator.js';
 import { World } from '../world/World.js';
 import { FluidSimulation } from '../world/Fluids.js';
+import { RedstoneSimulation } from './Redstone.js';
 import {
   END_ORIGIN,
   NETHER_ORIGIN,
@@ -810,6 +824,7 @@ export class Game {
       entities: this.entities ? this.entities.serialize() : [],
       edits: this.world.serializeEdits(),
       fluids: this.fluids ? this.fluids.serialize() : [],
+      redstone: this.redstone ? this.redstone.serialize() : null,
       renderDistance: this.world.renderDistance,
       settings: { ...this.settings, renderDistance: this.world.renderDistance },
       savedAt: Date.now(),
@@ -1273,6 +1288,13 @@ export class Game {
     this.gameAPI?.lanSend?.({ type: 'edit', x, y, z, id });
   }
 
+  /** Sets a block locally and broadcasts the edit to LAN peers. */
+  setBlockSynced(x, y, z, id) {
+    if (!this.world.setBlock(x, y, z, id)) return false;
+    this.sendNetworkEdit(x, y, z, id);
+    return true;
+  }
+
   updateNetwork(dt) {
     if (!this.net || !this.player) return;
     this.netSendTimer += dt;
@@ -1384,7 +1406,12 @@ export class Game {
     const id = Number(message.id) || 0;
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
     if (y < 0 || y >= WORLD_HEIGHT || !this.world.isChunkLoadedAt(x, z)) return;
+    const oldId = this.world.getBlock(x, y, z);
     if (!this.world.setBlock(x, y, z, id)) return;
+    if (id === 0 && oldId !== 0) {
+      this.redstone?.onBlockRemoved(x, y, z, oldId);
+    }
+    this.redstone?.notify(x, y, z);
     if (id === 0) {
       this.fluids?.remove(x, y, z);
       this.fluids?.wake(x, y, z);
@@ -1797,6 +1824,15 @@ export class Game {
       // so the saved state is applied when the initial area is ready.
       this.pendingFluids = Array.isArray(loadedSave?.fluids) ? loadedSave.fluids : null;
       this.pendingDrops = Array.isArray(loadedSave?.drops) ? loadedSave.drops : null;
+      this.redstone = new RedstoneSimulation(this.world, {
+        setBlock: (x, y, z, id) => this.setBlockSynced(x, y, z, id),
+        isHost: () => !this.net || this.net.role === 'host',
+        getPlayer: () => this.player,
+        getEntities: () => this.entities?.findAllNear?.(
+          this.player.position.x, this.player.position.z, 10,
+        ) ?? [],
+      });
+      this.pendingRedstone = loadedSave?.redstone ?? null;
 
       this.sky = new Sky(this.scene);
       this.drops = new ItemDrops(this.scene, this.world, this.assets, this.audio);
@@ -1996,6 +2032,10 @@ export class Game {
       this.drops?.applyState(this.pendingDrops);
       this.pendingDrops = null;
     }
+    if (info.mode === 'initial' && this.pendingRedstone) {
+      this.redstone?.load(this.pendingRedstone);
+      this.pendingRedstone = null;
+    }
 
     this.loadingInfo = null;
     this.lastHealth = this.player.health;
@@ -2068,6 +2108,11 @@ export class Game {
     }
     this.pendingFluids = null;
     this.pendingDrops = null;
+    this.pendingRedstone = null;
+    if (this.redstone) {
+      this.redstone.dispose();
+      this.redstone = null;
+    }
     if (this.world) {
       this.world.dispose();
       this.world = null;
@@ -2532,6 +2577,7 @@ export class Game {
     if (this.state !== 'playing') return;
 
     this.fluids?.update(dt);
+    this.redstone?.update(dt);
 
     this.entities?.update(dt, this.player, {
       timeOfDay: this.timeOfDay,
@@ -2670,6 +2716,8 @@ export class Game {
   breakBlock(mining, block) {
     const heldId = this.inventory.selectedStack?.id ?? null;
     if (!this.world.setBlock(mining.x, mining.y, mining.z, 0)) return;
+    this.redstone?.onBlockRemoved(mining.x, mining.y, mining.z, block.id);
+    this.redstone?.notify(mining.x, mining.y, mining.z);
     this.fluids?.wake(mining.x, mining.y, mining.z);
     this.sendNetworkEdit(mining.x, mining.y, mining.z, 0);
     this.audio.playBreak(block);
@@ -2706,6 +2754,15 @@ export class Game {
       }
       if (targetBlock.interactive === 'bed') {
         this.sleepInBed(target);
+        return;
+      }
+      const targetState = decodeState(target.id);
+      if (targetState?.type === 'door') {
+        this.toggleDoor(target, targetState);
+        return;
+      }
+      if (this.redstone?.interact(target.x, target.y, target.z)) {
+        this.audio.playClick();
         return;
       }
     }
@@ -2850,6 +2907,20 @@ export class Game {
     this.audio.playPlace(getBlock(placedId));
     this.onInventoryChanged();
     return true;
+  }
+
+  /** Opens or closes both halves of a door and syncs the change to the host. */
+  toggleDoor(target, state) {
+    if (!this.world) return;
+    const open = !state.open;
+    const footY = state.half ? target.y - 1 : target.y;
+    for (let half = 0; half < 2; half++) {
+      const y = footY + half;
+      if (this.world.getBlock(target.x, y, target.z) === 0) continue;
+      this.setBlockSynced(target.x, y, target.z, getDoorId(state.facing, open, half));
+      this.redstone?.notify(target.x, y, target.z);
+    }
+    this.audio.playClick();
   }
 
   /**
@@ -3055,31 +3126,77 @@ export class Game {
     return true;
   }
 
-  placeBlock(target, blockId) {
-    if (!target) return;
+  /**
+   * Expands the item being placed into the concrete block states. Multi-block
+   * devices (beds, doors) occupy two cells, while directional devices derive
+   * their facing from the player's look direction or the clicked face.
+   */
+  resolvePlacement(target, blockId) {
     const x = target.x + target.normal.x;
     const y = target.y + target.normal.y;
     const z = target.z + target.normal.z;
-    if (y < 0 || y >= WORLD_HEIGHT) return;
+    const state = decodeState(blockId);
+    const yawFacing = facingFromYaw(this.player.yaw);
+    const wallFacing = facingFromNormal(target.normal);
+    const onWall = target.normal.y === 0;
 
-    const existingId = this.world.getBlock(x, y, z);
-    const existing = getBlock(existingId);
-    if (existingId !== 0 && !existing.fluid) return;
-    if (!this.world.isChunkLoadedAt(x, z)) return;
-    if (this.player.intersectsBlock(x, y, z)) {
-      this.hud.toast('Здесь стоите вы');
-      return;
+    if (blockId === 63 && onWall) {
+      return [{ x, y, z, id: getWallTorchId(wallFacing) }];
+    }
+    if (state?.type === 'bed') {
+      const d = FACING_OFFSETS[yawFacing];
+      return [
+        { x, y, z, id: getBedId(yawFacing, false) },
+        { x: x + d.x, y, z: z + d.z, id: getBedId(yawFacing, true) },
+      ];
+    }
+    if (state?.type === 'door') {
+      return [
+        { x, y, z, id: getDoorId(yawFacing, false, 0) },
+        { x, y: y + 1, z, id: getDoorId(yawFacing, false, 1) },
+      ];
+    }
+    if (state?.type === 'lever') {
+      return [{ x, y, z, id: getLeverId(onWall ? wallFacing : yawFacing, false) }];
+    }
+    if (state?.type === 'button') {
+      return [{ x, y, z, id: getButtonId(onWall ? wallFacing : yawFacing, false) }];
+    }
+    if (state?.type === 'repeater') {
+      return [{ x, y, z, id: getRepeaterId(yawFacing, false, 1) }];
+    }
+    if (state?.type === 'piston') {
+      return [{ x, y, z, id: getPistonId(yawFacing, false, state.sticky) }];
+    }
+    return [{ x, y, z, id: blockId }];
+  }
+
+  placeBlock(target, blockId) {
+    if (!target) return;
+    const parts = this.resolvePlacement(target, blockId);
+    for (const part of parts) {
+      if (part.y < 0 || part.y >= WORLD_HEIGHT) return;
+      if (!this.world.isChunkLoadedAt(part.x, part.z)) return;
+      const existingId = this.world.getBlock(part.x, part.y, part.z);
+      const existing = getBlock(existingId);
+      if (existingId !== 0 && !existing.fluid) return;
+      if (this.player.intersectsBlock(part.x, part.y, part.z)) {
+        this.hud.toast('Здесь стоите вы');
+        return;
+      }
     }
 
     const block = getBlock(blockId);
-    if (!this.world.setBlock(x, y, z, blockId)) return;
-    this.sendNetworkEdit(x, y, z, blockId);
-    if (block.fluid) {
-      this.fluids?.setSource(x, y, z, blockId);
-      this.fluids?.wake(x, y, z);
-    } else {
-      this.fluids?.remove(x, y, z);
-      this.fluids?.wake(x, y, z);
+    for (const part of parts) {
+      if (!this.setBlockSynced(part.x, part.y, part.z, part.id)) return;
+      this.redstone?.notify(part.x, part.y, part.z);
+      if (getBlock(part.id).fluid) {
+        this.fluids?.setSource(part.x, part.y, part.z, part.id);
+        this.fluids?.wake(part.x, part.y, part.z);
+      } else {
+        this.fluids?.remove(part.x, part.y, part.z);
+        this.fluids?.wake(part.x, part.y, part.z);
+      }
     }
     if (!this.isCreative()) this.inventory.consumeSelected(1);
     this.audio.playPlace(block);

@@ -4,6 +4,7 @@ import {
   WORLD_HEIGHT,
 } from '../shared/constants.js';
 import { NoiseField, clamp, hash2i, hash3i, smoothstep } from '../shared/noise.js';
+import { getDoorId } from '../shared/blocks.js';
 
 export const BIOME = Object.freeze({
   OCEAN: 0,
@@ -84,6 +85,7 @@ const ID = {
   netherBricks: 52,
   magma: 53,
   quartzOre: 54,
+  redstoneOre: 182,
   endStone: 56,
   hay: 60,
   wheatCrop: 64,
@@ -336,6 +338,8 @@ export class WorldGenerator {
             blocks[localIndex(x, y, z)] = ID.gold;
           } else if (y < 64 && r < 0.0045 * (1.2 + vein)) {
             blocks[localIndex(x, y, z)] = ID.iron;
+          } else if (y < 48 && r < 0.006 * (1.2 + vein)) {
+            blocks[localIndex(x, y, z)] = ID.redstoneOre;
           } else if (y < 110 && r < 0.0085 * (1.2 + vein)) {
             blocks[localIndex(x, y, z)] = ID.coal;
           }
@@ -802,7 +806,7 @@ export class WorldGenerator {
               || (door === 1 && x === width - 1 && z === Math.floor(depth / 2))
               || (door === 3 && x === 0 && z === Math.floor(depth / 2))
             );
-            if (isDoor) id = ID.air;
+            if (isDoor) id = getDoorId(door, false, y);
             // Windows on the upper row.
             const window = y === 1 && (
               (z === 0 && x > 0 && x < width - 1 && x !== Math.floor(width / 2))
@@ -810,7 +814,7 @@ export class WorldGenerator {
               || (x === 0 && z > 0 && z < depth - 1)
               || (x === width - 1 && z > 0 && z < depth - 1)
             );
-            if (window && id !== ID.air) id = 12;
+            if (window && id !== ID.air && !isDoor) id = 12;
             set(wx, base + 1 + y, wz, id);
           }
         }

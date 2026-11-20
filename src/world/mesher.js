@@ -7,7 +7,8 @@ import {
   SUN_AXIS_Z,
   WORLD_HEIGHT,
 } from '../shared/constants.js';
-import { BLOCKS, isRenderable } from '../shared/blocks.js';
+import { BLOCKS, BLOCK_DEFS, isRenderable } from '../shared/blocks.js';
+import { TILE } from '../shared/textures.js';
 
 const PAD_STRIDE_Z = PAD_X;
 const PAD_STRIDE_Y = PAD_X * PAD_Z;
@@ -35,9 +36,12 @@ function isOpaqueAt(padded, x, y, z) {
   return block && block.opaque ? 1 : 0;
 }
 
-const TORCH_ID = 63;
-// Crops and fences are drawn as two crossed planes instead of a cube.
-const CROSS_IDS = new Set([64, 65, 66, 67, 68]);
+// Crops still use crossed billboards. Everything else with a non-cube silhouette
+// declares `customShape` in its block definition and is emitted after the
+// greedy cube pass.
+const CROSS_IDS = new Set([64, 65, 66, 67]);
+const CUSTOM_IDS = new Set(BLOCK_DEFS.filter((block) => block.customShape).map((block) => block.id));
+const FENCE_ID = 68;
 
 /**
  * Flood-fills block light from emissive blocks (torches, glowstone, furnaces,
@@ -99,52 +103,294 @@ function lightAtIndex(light, x, y, z) {
   return light[padIndex(x, y, z)];
 }
 
-/**
- * A torch is a thin centred post rather than a full cube. Emitting its five
- * visible quads directly keeps the normal greedy pass free of special cases.
- */
-function emitTorch(bucket, x, y, z, lightMap, tops) {
-  const block = BLOCKS[TORCH_ID];
-  const tile = block.faceTiles[0];
+/** Adds one axis-aligned quad using the same UV convention as greedy faces. */
+function addFace(bucket, axis, sign, fixed, u0, u1, v0, v1, tile, sky, light) {
+  const uAxis = axis === 0 ? 2 : 0;
+  const vAxis = axis === 1 ? 2 : 1;
+  const corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+  const points = corners.map(([u, v]) => {
+    const p = [0, 0, 0];
+    p[axis] = fixed;
+    p[uAxis] = u;
+    p[vAxis] = v;
+    return p;
+  });
+  const uvs = axis === 1
+    ? corners.map(([u, v]) => [u, v])
+    : corners.map(([u, v]) => [u, -v]);
+  const normal = [0, 0, 0];
+  normal[axis] = sign;
+  // This UV convention follows Z/Y for X faces and X/Z for top faces, so the
+  // geometric winding is reversed on those two axes. Flip it to keep the
+  // generated boxes front-facing from the outside.
+  const winding = sign * (axis === 2 ? 1 : -1);
+  bucket.addQuad(points, normal, uvs, tile, 255, sky, 0, 0, winding, light);
+}
+
+/** Emits a textured box. Tiles follow the block faceTiles order. */
+function emitBox(bucket, box, tiles, sky, light) {
+  const [x0, y0, z0, x1, y1, z1] = box;
+  addFace(bucket, 1, 1, y1, x0, x1, z0, z1, tiles[0], sky, light);
+  addFace(bucket, 1, -1, y0, x0, x1, z0, z1, tiles[1], sky, light);
+  addFace(bucket, 0, 1, x1, z0, z1, y0, y1, tiles[2], sky, light);
+  addFace(bucket, 0, -1, x0, z0, z1, y0, y1, tiles[3], sky, light);
+  addFace(bucket, 2, 1, z1, x0, x1, y0, y1, tiles[4], sky, light);
+  addFace(bucket, 2, -1, z0, x0, x1, y0, y1, tiles[5], sky, light);
+}
+
+/** A two-sided diagonal billboard, used for flames. */
+function emitBillboard(bucket, ax, az, bx, bz, y0, y1, tile, sky, light) {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const length = Math.hypot(dx, dz) || 1;
+  const nx = -dz / length;
+  const nz = dx / length;
+  const points = [
+    [ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az],
+  ];
+  const uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
+  for (const sign of [1, -1]) {
+    bucket.addQuad(points, [nx * sign, 0, nz * sign], uvs, tile, 255, sky, 0, 0, sign, light);
+  }
+}
+
+function emitFlame(bucket, x, y, z, tile, sky, light) {
+  const thick = 1 / 16;
+  const middle = 0.5;
+  const lo = middle - thick;
+  const hi = middle + thick;
+  emitBillboard(bucket, x + lo, z + lo, x + hi, z + hi, y, y + 0.45, tile, sky, light);
+  emitBillboard(bucket, x + lo, z + hi, x + hi, z + lo, y, y + 0.45, tile, sky, light);
+}
+
+function emitTorchShape(bucket, x, y, z, block, sky, light) {
+  const stick = allTiles(block.stickTile);
+  const thin = 1 / 16;
+  const centre = 0.5;
+  const lo = centre - thin;
+  const hi = centre + thin;
+  if (block.facing === 5 || block.facing === 4) {
+    const base = y + (block.facing === 5 ? 0.0625 : 0.375);
+    emitBox(bucket, [x + lo, base, z + lo, x + hi, base + 0.625, z + hi], stick, sky, light);
+    emitFlame(bucket, x, base + 0.5, z, block.flameTile, sky, light);
+    return;
+  }
+  const offset = block.facing === 1 ? [0, 0.625]
+    : block.facing === 3 ? [0.375, 1]
+      : block.facing === 2 ? [0, 0.625]
+        : [0.375, 1];
+  const cy = y + 0.5;
+  if (block.facing === 1 || block.facing === 3) {
+    emitBox(bucket, [x + offset[0], cy - thin, z + lo, x + offset[1], cy + thin, z + hi], stick, sky, light);
+  } else {
+    emitBox(bucket, [x + lo, cy - thin, z + offset[0], x + hi, cy + thin, z + offset[1]], stick, sky, light);
+  }
+  emitFlame(bucket, x, cy - 0.1, z, block.flameTile, sky, light);
+}
+
+const allTiles = (tile) => [tile, tile, tile, tile, tile, tile];
+
+function emitBed(bucket, x, y, z, block, sky, light) {
+  const alongX = block.facing === 1 || block.facing === 3;
+  const wood = allTiles(TILE.oak_planks);
+  const mattress = allTiles(TILE.bed_side);
+  mattress[0] = TILE.bed_top;
+  mattress[1] = TILE.oak_planks;
+
+  // Four short legs and a thin platform instead of one chunky box.
+  for (const lx of [0.0625, 0.8125]) {
+    for (const lz of [0.0625, 0.8125]) {
+      emitBox(bucket, [
+        x + lx, y + 0.0625, z + lz,
+        x + lx + 0.125, y + 0.375, z + lz + 0.125,
+      ], wood, sky, light);
+    }
+  }
+  emitBox(bucket, [
+    x + 0.0625, y + 0.375, z + 0.0625,
+    x + 0.9375, y + 0.4375, z + 0.9375,
+  ], wood, sky, light);
+
+  // The mattress is a thin slab on top of the frame.
+  emitBox(bucket, [
+    x + 0.125, y + 0.4375, z + 0.125,
+    x + 0.875, y + 0.5625, z + 0.875,
+  ], mattress, sky, light);
+
+  // A raised board at the outer end of the bed (headboard / footboard).
+  const boardTop = block.head ? 0.8125 : 0.75;
+  if (alongX) {
+    const bx = block.head
+      ? (block.facing === 1 ? x + 0.8125 : x + 0.0625)
+      : (block.facing === 1 ? x + 0.0625 : x + 0.8125);
+    emitBox(bucket, [
+      bx, y + 0.4375, z + 0.0625,
+      bx + 0.125, y + boardTop, z + 0.9375,
+    ], wood, sky, light);
+  } else {
+    const bz = block.head
+      ? (block.facing === 2 ? z + 0.8125 : z + 0.0625)
+      : (block.facing === 2 ? z + 0.0625 : z + 0.8125);
+    emitBox(bucket, [
+      x + 0.0625, y + 0.4375, bz,
+      x + 0.9375, y + boardTop, bz + 0.125,
+    ], wood, sky, light);
+  }
+
+  // A pillow on the head cell, and a raised blanket on the foot cell, make
+  // the two halves read as one long bed rather than two blocks.
+  if (block.head) {
+    const pillow = allTiles(TILE.white_wool);
+    if (alongX) {
+      const px = block.facing === 1 ? x + 0.5625 : x + 0.1875;
+      emitBox(bucket, [
+        px, y + 0.5625, z + 0.1875,
+        px + 0.25, y + 0.625, z + 0.8125,
+      ], pillow, sky, light);
+    } else {
+      const pz = block.facing === 2 ? z + 0.5625 : z + 0.1875;
+      emitBox(bucket, [
+        x + 0.1875, y + 0.5625, pz,
+        x + 0.8125, y + 0.625, pz + 0.25,
+      ], pillow, sky, light);
+    }
+  } else {
+    const blanket = allTiles(TILE.red_wool);
+    emitBox(bucket, [
+      x + 0.1875, y + 0.5625, z + 0.1875,
+      x + 0.8125, y + 0.625, z + 0.8125,
+    ], blanket, sky, light);
+  }
+}
+
+function emitDoor(bucket, x, y, z, block, sky, light) {
+  const alongX = block.facing === 0 || block.facing === 2;
+  const panel = allTiles(TILE.door_bottom);
+  panel[0] = block.half ? TILE.door_top : TILE.door_bottom;
+  // The lower half reaches the cell boundary and the upper half starts there,
+  // so the two pieces form one tall panel instead of two square doors.
+  const y0 = y + (block.half ? 0 : 0.015625);
+  const y1 = y + (block.half ? 0.984375 : 1);
+  let box;
+  if (alongX) {
+    const hingeLow = block.facing === 0 || block.facing === 3;
+    if (block.open) {
+      const px = hingeLow ? x + 0.0625 : x + 0.8125;
+      box = [px, y0, z + 0.0625, px + 0.125, y1, z + 0.9375];
+    } else {
+      box = [x + 0.0625, y0, z + 0.4375, x + 0.9375, y1, z + 0.5625];
+    }
+  } else if (block.open) {
+    const pz = block.facing === 1 ? z + 0.8125 : z + 0.0625;
+    box = [x + 0.0625, y0, pz, x + 0.9375, y1, pz + 0.125];
+  } else {
+    box = [x + 0.4375, y0, z + 0.0625, x + 0.5625, y1, z + 0.9375];
+  }
+  emitBox(bucket, box, panel, sky, light);
+  if (!block.half) {
+    const metal = allTiles(TILE.iron_block);
+    if (alongX && !block.open) {
+      emitBox(bucket, [x + 0.8125, y + 0.5, z + 0.5625, x + 0.875, y + 0.625, z + 0.625], metal, sky, light);
+    } else if (!alongX && !block.open) {
+      emitBox(bucket, [x + 0.5625, y + 0.5, z + 0.8125, x + 0.625, y + 0.625, z + 0.875], metal, sky, light);
+    }
+  }
+}
+
+function emitFence(bucket, padded, x, y, z, sky, light) {
+  const wood = allTiles(TILE.oak_fence);
+  emitBox(bucket, [x + 0.375, y, z + 0.375, x + 0.625, y + 1.5, z + 0.625], wood, sky, light);
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (const [dx, dz] of dirs) {
+    const nx = x + dx;
+    const nz = z + dz;
+    const neighbor = BLOCKS[padded[padIndex(nx, y, nz)]];
+    if (!neighbor) continue;
+    const fence = padded[padIndex(nx, y, nz)] === FENCE_ID;
+    const solid = neighbor.solid && neighbor.opaque;
+    if (!fence && !solid) continue;
+    // Each fence-fence pair is emitted once, even across chunk borders.
+    if (fence && nx <= x && nz <= z) continue;
+    for (const [h0, h1] of [[0.375, 0.5625], [0.9375, 1.125]]) {
+      let box;
+      if (dx !== 0) {
+        const x0 = dx > 0 ? x + 0.5 : x;
+        box = [x0, y + h0, z + 0.4375, x0 + 0.5, y + h1, z + 0.5625];
+      } else {
+        const z0 = dz > 0 ? z + 0.5 : z;
+        box = [x + 0.4375, y + h0, z0, x + 0.5625, y + h1, z0 + 0.5];
+      }
+      emitBox(bucket, box, wood, sky, light);
+    }
+  }
+}
+
+function emitLever(bucket, x, y, z, block, sky, light) {
+  const base = allTiles(TILE.lever_off);
+  emitBox(bucket, [x + 0.3125, y + 0.0625, z + 0.3125, x + 0.6875, y + 0.1875, z + 0.6875], base, sky, light);
+  const handle = allTiles(block.powered ? TILE.lever_on : TILE.lever_off);
+  if (block.powered) {
+    emitBox(bucket, [x + 0.4375, y + 0.1875, z + 0.4375, x + 0.5625, y + 0.75, z + 0.5625], handle, sky, light);
+  } else {
+    emitBox(bucket, [x + 0.4375, y + 0.1875, z + 0.5, x + 0.5625, y + 0.375, z + 0.625], handle, sky, light);
+  }
+}
+
+function emitButton(bucket, x, y, z, block, sky, light) {
+  const tile = block.pressed ? TILE.button_on : TILE.button_off;
+  const tiles = allTiles(tile);
+  const depth = block.pressed ? 0.0625 : 0.125;
+  const alongX = block.facing === 1 || block.facing === 3;
+  const low = block.facing === 0 || block.facing === 3;
+  if (alongX) {
+    const x0 = low ? x + 0.0625 : x + 1 - 0.0625 - depth;
+    emitBox(bucket, [x0, y + 0.375, z + 0.375, x0 + depth, y + 0.625, z + 0.625], tiles, sky, light);
+  } else {
+    const z0 = low ? z + 0.0625 : z + 1 - 0.0625 - depth;
+    emitBox(bucket, [x + 0.375, y + 0.375, z0, x + 0.625, y + 0.625, z0 + depth], tiles, sky, light);
+  }
+}
+
+function emitPlate(bucket, x, y, z, block, sky, light) {
+  const tiles = allTiles(block.powered ? TILE.plate_on : TILE.plate_off);
+  const bottom = block.powered ? y + 0.015625 : y + 0.0625;
+  emitBox(bucket, [x + 0.0625, bottom, z + 0.0625, x + 0.9375, bottom + 0.0625, z + 0.9375], tiles, sky, light);
+}
+
+function emitWire(bucket, x, y, z, block, sky, light) {
+  const tiles = allTiles(block.powered ? TILE.wire_on : TILE.wire_off);
+  const bottom = y + 0.03125;
+  emitBox(bucket, [x, bottom, z + 0.4375, x + 1, bottom + 0.0625, z + 0.5625], tiles, sky, light);
+  emitBox(bucket, [x + 0.4375, bottom, z, x + 0.5625, bottom + 0.0625, z + 1], tiles, sky, light);
+}
+
+function emitRepeater(bucket, x, y, z, block, sky, light) {
+  const tiles = allTiles(block.powered ? TILE.repeater_on : TILE.repeater_off);
+  emitBox(bucket, [x + 0.0625, y + 0.0625, z + 0.0625, x + 0.9375, y + 0.1875, z + 0.9375], tiles, sky, light);
+  const nubs = allTiles(block.powered ? TILE.wire_on : TILE.wire_off);
+  const alongX = block.facing === 1 || block.facing === 3;
+  if (alongX) {
+    emitBox(bucket, [x + 0.1875, y + 0.1875, z + 0.1875, x + 0.3125, y + 0.3125, z + 0.3125], nubs, sky, light);
+    emitBox(bucket, [x + 0.6875, y + 0.1875, z + 0.6875, x + 0.8125, y + 0.3125, z + 0.8125], nubs, sky, light);
+  } else {
+    emitBox(bucket, [x + 0.1875, y + 0.1875, z + 0.6875, x + 0.3125, y + 0.3125, z + 0.8125], nubs, sky, light);
+    emitBox(bucket, [x + 0.6875, y + 0.1875, z + 0.1875, x + 0.8125, y + 0.3125, z + 0.3125], nubs, sky, light);
+  }
+}
+
+function emitCustom(bucket, padded, x, y, z, block, lightMap, tops) {
   const sky = computeSky(tops, x, z, y + 1);
   const light = lightAtIndex(lightMap, x, y, z);
-  const half = 1 / 16;
-  const cx = x + 0.5;
-  const cz = z + 0.5;
-  const bottom = y + 0.0625;
-  const top = y + 0.625;
-  const normal = [0, 0, 0];
-  const pos = [0, 0, 0];
-
-  const addFace = (axis, sign, fixed, u0, u1, v0, v1) => {
-    const uAxis = (axis + 1) % 3;
-    const vAxis = (axis + 2) % 3;
-    const corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-    const points = corners.map(([u, v]) => {
-      pos[axis] = fixed;
-      pos[uAxis] = u;
-      pos[vAxis] = v;
-      return [pos[0], pos[1], pos[2]];
-    });
-    // Texture V runs downward: put V=0 on the top of the post so the flame
-    // stays upright on every side face.
-    const faceUvs = axis === 1
-      ? [[0, 0], [1, 0], [1, 1], [0, 1]]
-      : axis === 0
-        ? [[0, 1], [0, 0], [1, 0], [1, 1]]
-        : [[0, 1], [1, 1], [1, 0], [0, 0]];
-    normal[0] = 0;
-    normal[1] = 0;
-    normal[2] = 0;
-    normal[axis] = sign;
-    bucket.addQuad(points, normal, faceUvs, tile, 255, sky, 0, 0, sign, light);
-  };
-
-  addFace(0, 1, cx + half, bottom, top, cz - half, cz + half);
-  addFace(0, -1, cx - half, bottom, top, cz - half, cz + half);
-  addFace(2, 1, cz + half, cx - half, cx + half, bottom, top);
-  addFace(2, -1, cz - half, cx - half, cx + half, bottom, top);
-  addFace(1, 1, top, cx - half, cx + half, cz - half, cz + half);
+  if (block.torch) emitTorchShape(bucket, x, y, z, block, sky, light);
+  else if (block.bed) emitBed(bucket, x, y, z, block, sky, light);
+  else if (block.door) emitDoor(bucket, x, y, z, block, sky, light);
+  else if (block.id === FENCE_ID) emitFence(bucket, padded, x, y, z, sky, light);
+  else if (block.lever) emitLever(bucket, x, y, z, block, sky, light);
+  else if (block.button) emitButton(bucket, x, y, z, block, sky, light);
+  else if (block.plate) emitPlate(bucket, x, y, z, block, sky, light);
+  else if (block.wire) emitWire(bucket, x, y, z, block, sky, light);
+  else if (block.repeater) emitRepeater(bucket, x, y, z, block, sky, light);
+  else emitBox(bucket, [x, y, z, x + 1, y + 1, z + 1], block.faceTiles, sky, light);
 }
 
 /**
@@ -472,9 +718,8 @@ export function meshChunk(padded, originX, originZ, extTops) {
             pos[uAxis] = u;
             pos[vAxis] = v;
             const blockId = padded[padIndex(pos[0], pos[1], pos[2])];
-            // Torches, crops and fences use their own geometry, emitted after
-            // the cube pass.
-            if (blockId === TORCH_ID || CROSS_IDS.has(blockId)) continue;
+            // Non-cube blocks use their own geometry, emitted after the cube pass.
+            if (CROSS_IDS.has(blockId) || CUSTOM_IDS.has(blockId)) continue;
             if (!isRenderable(blockId)) continue;
 
             neighbor[0] = pos[0];
@@ -489,17 +734,17 @@ export function meshChunk(padded, originX, originZ, extTops) {
             const aoPack = computeAO(padded, pos[0], pos[1], pos[2], axis, sign, uAxis, vAxis);
             const skyLevel = faceSky(tops, pos[0], pos[1], pos[2], axis, sign);
             faceHorizon(tops, pos[0], pos[1], pos[2], axis, sign, horizon);
-            const hPlus = Math.round(horizon[0] * 63);
-            const hMinus = Math.round(horizon[1] * 63);
+            const hPlus = Math.round(horizon[0] * 31);
+            const hMinus = Math.round(horizon[1] * 31);
             const canMergeV = block.mergeSides || axis === 1 ? 1 : 0;
             // body = tile * 2048 + aoPack * 8 + skyLevel * 2 + canMergeV
-            //      + hPlus * 131072 + hMinus * 8388608
-            // AO, skylight and sun horizons all join the key so quads never
-            // merge across a lighting or shadow discontinuity; a merged quad
-            // therefore keeps one uniform light value. Block light is stored
-            // alongside in lightMask (the 32-bit key is already full).
+            //      + hPlus * 262144 + hMinus * 8388608
+            // Tiles need seven bits: the atlas now has more than 64 layers and
+            // truncating them made late tiles (bed, redstone) render as other
+            // blocks. Horizons keep five bits each; the lost precision is
+            // invisible after the byte conversion in the shader.
             mask[u + v * stride] = 1 + (tile << 11) + (aoPack << 3)
-              + (skyLevel << 1) + canMergeV + (hPlus << 17) + (hMinus << 23);
+              + (skyLevel << 1) + canMergeV + (hPlus << 18) + (hMinus << 23);
             const emitted = block.light ?? 0;
             lightMask[u + v * stride] = Math.max(
               emitted,
@@ -536,11 +781,11 @@ export function meshChunk(padded, originX, originZ, extTops) {
             const body = key - 1;
             const skyLevel = (body >> 1) & 3;
             const aoPack = (body >> 3) & 255;
-            const tile = (body >> 11) & 63;
-            const hPlus = (body >> 17) & 63;
-            const hMinus = (body >> 23) & 63;
-            const hPlusByte = Math.round(hPlus * (255 / 63));
-            const hMinusByte = Math.round(hMinus * (255 / 63));
+            const tile = (body >> 11) & 127;
+            const hPlus = (body >> 18) & 31;
+            const hMinus = (body >> 23) & 31;
+            const hPlusByte = Math.round(hPlus * (255 / 31));
+            const hMinusByte = Math.round(hMinus * (255 / 31));
 
             // Recover the actual block at the first cell for bucket selection.
             const first = [0, 0, 0];
@@ -592,14 +837,14 @@ export function meshChunk(padded, originX, originZ, extTops) {
     }
   }
 
-  // Torches and cross-shaped blocks are not cubes; emit their custom quads now
-  // that the cube pass has finished so they never interfere with merging.
+  // Non-cube blocks are emitted after the cube pass so they never interfere
+  // with greedy merging. Fences read their neighbours from the padded volume.
   for (let y = 0; y <= topRow; y++) {
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         const id = padded[padIndex(x, y, z)];
-        if (id === TORCH_ID) emitTorch(solid, x, y, z, blockLight, tops);
-        else if (CROSS_IDS.has(id)) emitCross(solid, x, y, z, BLOCKS[id], blockLight, tops);
+        if (CROSS_IDS.has(id)) emitCross(solid, x, y, z, BLOCKS[id], blockLight, tops);
+        else if (CUSTOM_IDS.has(id)) emitCustom(solid, padded, x, y, z, BLOCKS[id], blockLight, tops);
       }
     }
   }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getMaxStack } from '../shared/items.js';
+import { getBlockItemId } from '../shared/blocks.js';
 
 const HALF = 0.14;
 const HEIGHT = 0.28;
@@ -104,7 +105,9 @@ export class ItemDrops {
     if (!player.canHarvest(block, heldId)) return;
     for (const drop of block.drops) {
       if (drop.chance !== undefined && Math.random() > drop.chance) continue;
-      this.spawn(drop.id, drop.count ?? 1, x + 0.5, y + 0.35, z + 0.5);
+      const itemId = drop.id < 256 ? getBlockItemId(drop.id) : drop.id;
+      if (!itemId) continue;
+      this.spawn(itemId, drop.count ?? 1, x + 0.5, y + 0.35, z + 0.5);
     }
   }
 
