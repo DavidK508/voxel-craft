@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFLoader } from '../vendor/three/loaders/GLTFLoader.js';
 
 /** Every GLB produced by tools/generate_models.py. */
 export const MODEL_KEYS = [
