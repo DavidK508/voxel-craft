@@ -58,6 +58,13 @@ import { Entity } from '../src/entities/Entity.js';
 import { EntityManager } from '../src/entities/EntityManager.js';
 import { FluidSimulation } from '../src/world/Fluids.js';
 import { RedstoneSimulation } from '../src/game/Redstone.js';
+import {
+  MAP_SIZE,
+  mapMarkers,
+  normalizeMapPoint,
+  playerColor,
+  projectPoint,
+} from '../src/ui/minimap.js';
 
 const results = [];
 let failed = 0;
@@ -1028,6 +1035,41 @@ await test('inventory equips and persists armor', () => {
   for (let i = 0; i < 10000; i++) restored.damageArmor(10);
   assert.ok(restored.armor.every((stack) => stack === null));
   assert.equal(restored.armorPoints(), 0);
+});
+
+await test('minimap projects world points around the player', () => {
+  const center = { x: 100, z: -40 };
+  const middle = projectPoint(center, center);
+  assert.equal(middle.x, MAP_SIZE / 2);
+  assert.equal(middle.y, MAP_SIZE / 2);
+  assert.equal(middle.clamped, false);
+
+  const north = projectPoint({ x: 100, z: -88 }, center);
+  assert.ok(north.y < middle.y, 'north (-Z) should be drawn above the player');
+
+  const far = projectPoint({ x: 100, z: -1000 }, center);
+  assert.equal(far.clamped, true);
+  assert.ok(far.y >= 0 && far.y < MAP_SIZE, 'distant markers stay on the canvas');
+});
+
+await test('minimap collects respawn, death and remote player markers', () => {
+  const markers = mapMarkers({
+    spawn: { x: 1, z: 2 },
+    lastDeath: { x: 3, z: 4 },
+    players: [
+      { id: 'anna', name: 'Аня', x: 5, z: 6, spawn: { x: 7, z: 8 }, lastDeath: { x: 9, z: 10 } },
+      { id: 'boris', name: 'Боря', x: 0, z: 0 },
+    ],
+  });
+  assert.equal(markers.filter((marker) => marker.type === 'spawn').length, 2);
+  assert.equal(markers.filter((marker) => marker.type === 'death').length, 2);
+  assert.equal(markers.filter((marker) => marker.type === 'player').length, 2);
+  assert.equal(markers[0].label, 'Спавн');
+  assert.equal(markers.find((marker) => marker.type === 'death').label, 'Смерть');
+  assert.ok(new Set(markers.map((marker) => marker.color)).size > 1);
+  assert.equal(playerColor('anna'), playerColor('anna'));
+  assert.deepEqual(normalizeMapPoint({ x: '4', z: '5' }), { x: 4, y: 0, z: 5 });
+  assert.equal(normalizeMapPoint(null), null);
 });
 
 await test('fluids flow downwards and spread sideways', () => {

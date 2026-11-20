@@ -46,6 +46,7 @@ import { buildTextureAssets } from '../render/TextureAtlas.js';
 import { createTextureArray, TerrainMaterials } from '../render/TerrainMaterials.js';
 import { Sky } from '../render/Sky.js';
 import { HUD } from '../ui/HUD.js';
+import { normalizeMapPoint } from '../ui/minimap.js';
 import { InventoryUI } from '../ui/InventoryUI.js';
 import { TradeUI } from '../ui/TradeUI.js';
 import { CharacterCreator } from '../ui/CharacterCreator.js';
@@ -240,6 +241,7 @@ export class Game {
     this.selection = null;
     this.dimension = 'overworld';
     this.returnPoint = null;
+    this.lastDeath = null;
     this.teleportCooldown = 0;
     this.attackCooldown = 0;
     this.riding = null;
@@ -821,6 +823,7 @@ export class Game {
       gameMode: this.gameMode,
       dimension: this.dimension,
       returnPoint: this.returnPoint,
+      lastDeath: this.lastDeath,
       entities: this.entities ? this.entities.serialize() : [],
       edits: this.world.serializeEdits(),
       fluids: this.fluids ? this.fluids.serialize() : [],
@@ -1145,7 +1148,12 @@ export class Game {
         if (message.target === this.net?.id) {
           this.hud?.toast(`${message.killer || 'Игрок'} убил вас`, 3600);
         } else {
-          if (victim) victim.health = 0;
+          if (victim) {
+            victim.health = 0;
+            victim.lastDeath = normalizeMapPoint(message) ?? {
+              x: victim.x, y: victim.y, z: victim.z,
+            };
+          }
           this.hud?.toast(`${message.killer || 'Игрок'} убил ${victim?.name || 'игрока'}`, 3200);
         }
         this.updatePlayerList();
@@ -1243,6 +1251,8 @@ export class Game {
       yaw: this.player.yaw,
       pitch: this.player.pitch,
       health: Math.max(0, Math.round(this.player.health)),
+      spawn: { x: this.spawn.x, y: this.spawn.y, z: this.spawn.z },
+      lastDeath: this.lastDeath,
       armor: (this.inventory?.armor ?? []).map((stack) => stack?.id ?? 0),
       appearance: this.appearance,
     };
@@ -1339,6 +1349,7 @@ export class Game {
       name: name || 'Игрок',
       x: at.x, y: at.y, z: at.z,
       yaw: 0, pitch: 0, speed: 0, health: 20,
+      spawn: null, lastDeath: null,
     });
   }
 
@@ -1361,6 +1372,8 @@ export class Game {
       health: Number.isFinite(Number(message.health))
         ? Number(message.health)
         : (previous?.health ?? 20),
+      spawn: normalizeMapPoint(message.spawn) ?? previous?.spawn ?? null,
+      lastDeath: normalizeMapPoint(message.lastDeath) ?? previous?.lastDeath ?? null,
     };
     this.remotePlayers.set(message.id, player);
     const model = this.ensureRemotePlayer(message.id, player.name);
@@ -1534,6 +1547,18 @@ export class Game {
     this.hud.setPlayerList(entries, header);
   }
 
+  /** Feeds the corner minimap with local/remote respawn and death markers. */
+  updateMap() {
+    if (!this.hud?.updateMap || !this.player) return;
+    this.hud.updateMap({
+      position: this.player.position,
+      yaw: this.player.yaw,
+      spawn: this.spawn,
+      lastDeath: this.lastDeath,
+      players: [...this.remotePlayers.values()],
+    });
+  }
+
   getAttackDamage() {
     const heldId = this.inventory?.selectedStack?.id ?? null;
     const tool = getToolInfo(heldId);
@@ -1606,8 +1631,10 @@ export class Game {
       const remote = this.remotePlayers.get(targetId);
       if ((targetId === this.net.id && this.player?.dead)
         || (remote && (remote.health ?? 20) <= 0)) {
+        const point = targetId === this.net.id ? this.player?.position : remote;
         this.gameAPI?.lanSend?.({
           type: 'player-death', target: targetId, killer: message.attackerName,
+          x: point?.x, y: point?.y, z: point?.z,
         });
       }
     }
@@ -1856,7 +1883,9 @@ export class Game {
           this.inventory.fillCreativeKit();
         }
         this.returnPoint = this.normalizeReturnPoint(loadedSave.returnPoint);
+        this.lastDeath = normalizeMapPoint(loadedSave.lastDeath);
       } else {
+        this.lastDeath = null;
         const found = findSpawn(worldSeed);
         this.spawn = {
           x: found.x,
@@ -2336,8 +2365,11 @@ export class Game {
     this.input.clearMouseButtons();
     this.input.exitLock();
 
+    const p = this.player.position;
+    this.lastDeath = { x: p.x, y: p.y, z: p.z };
+    this.updateMap();
+
     if (dropItems && this.inventory && this.drops) {
-      const p = this.player.position;
       for (const stack of this.inventory.slots) {
         if (!stack) continue;
         this.drops.spawnStack(stack, p.x, p.y + 1.2, p.z, 1.5);
@@ -3296,6 +3328,7 @@ export class Game {
       Math.floor(this.player.position.z),
     ) ?? '—';
     this.hud.updateLocation(biome, this.player.position);
+    this.updateMap();
     this.hud.setUnderwater(this.player.headInWater);
     this.updateDebug();
   }

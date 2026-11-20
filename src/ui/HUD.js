@@ -1,4 +1,5 @@
 import { getItem, getToolInfo } from '../shared/items.js';
+import { MAP_RADIUS, MAP_SIZE, mapMarkers, projectPoint } from './minimap.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -36,6 +37,8 @@ export class HUD {
     this.playerListEl = $('player-list');
     this.playerListHeaderEl = $('player-list-header');
     this.playerListItemsEl = $('player-list-items');
+    this.mapCanvas = $('minimap-canvas');
+    this.mapCtx = this.mapCanvas?.getContext?.('2d') ?? null;
 
     this.healthIcons = [];
     this.airIcons = [];
@@ -205,6 +208,99 @@ export class HUD {
       this.lastCoords = coords;
       this.coordsEl.textContent = coords;
     }
+  }
+
+  /** Small north-up overview of respawn points, other players and the last death. */
+  updateMap(state) {
+    const ctx = this.mapCtx;
+    if (!ctx || !state?.position) return;
+    const size = MAP_SIZE;
+    const half = size / 2;
+    const scale = half / MAP_RADIUS;
+    const center = state.position;
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = 'rgba(8, 14, 18, 0.82)';
+    ctx.fillRect(0, 0, size, size);
+
+    // Chunk-aligned grid makes distances easy to read at a glance.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.09)';
+    ctx.lineWidth = 1;
+    const gridX = Math.floor(center.x / 16) * 16;
+    const gridZ = Math.floor(center.z / 16) * 16;
+    for (let wx = gridX - MAP_RADIUS; wx <= gridX + MAP_RADIUS; wx += 16) {
+      const x = half + (wx - center.x) * scale;
+      if (x < 0 || x > size) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, size);
+      ctx.stroke();
+    }
+    for (let wz = gridZ - MAP_RADIUS; wz <= gridZ + MAP_RADIUS; wz += 16) {
+      const y = half + (wz - center.z) * scale;
+      if (y < 0 || y > size) continue;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(size, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(230, 240, 235, 0.65)';
+    ctx.font = '10px monospace';
+    ctx.fillText('С', half - 3, 12);
+
+    for (const marker of mapMarkers(state)) {
+      const point = projectPoint(marker, center, size);
+      ctx.globalAlpha = point.clamped ? 0.72 : 1;
+      const radius = point.clamped ? 3 : 4.5;
+      if (marker.type === 'spawn') {
+        ctx.fillStyle = marker.color;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(point.x, point.y - radius);
+        ctx.lineTo(point.x + radius, point.y);
+        ctx.lineTo(point.x, point.y + radius);
+        ctx.lineTo(point.x - radius, point.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (marker.type === 'death') {
+        ctx.strokeStyle = marker.color;
+        ctx.lineWidth = point.clamped ? 1.5 : 2.5;
+        ctx.beginPath();
+        ctx.moveTo(point.x - radius, point.y - radius);
+        ctx.lineTo(point.x + radius, point.y + radius);
+        ctx.moveTo(point.x + radius, point.y - radius);
+        ctx.lineTo(point.x - radius, point.y + radius);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = marker.color;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Local player: white arrow pointing where the camera faces (yaw 0 = north).
+    ctx.save();
+    ctx.translate(half, half);
+    ctx.rotate(-(state.yaw || 0));
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(0, 3);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   setHeldName(name) {
