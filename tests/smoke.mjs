@@ -539,7 +539,7 @@ await test('decorative blocks use rectangular, non-cube geometry', () => {
   assert.ok(open.size[2] > 0.8, 'open door swings across the whole cell');
 
   const lever = meshSingleBlock(getLeverId(2, false));
-  assert.ok(lever.size[1] < 0.5, 'lever is a low mechanism');
+  assert.ok(lever.size[1] < 0.6, 'lever is a low mechanism');
   const button = meshSingleBlock(getButtonId(2, false));
   assert.ok(button.size[1] < 0.4, 'button is a small, flat control');
   const wire = meshSingleBlock(getDustId(false));
@@ -547,6 +547,69 @@ await test('decorative blocks use rectangular, non-cube geometry', () => {
   assert.ok(wire.size[0] > 0.9 && wire.size[2] > 0.9, 'dust crosses the cell');
   const repeater = meshSingleBlock(getRepeaterId(0, false, 1));
   assert.ok(repeater.size[1] < 0.4, 'repeater is a low rectangular device');
+});
+
+await test('lever handle follows facing, mounting and power state', () => {
+  const deviceTiles = new Set([
+    TILE.cobblestone, TILE.oak_planks, TILE.lever_off, TILE.lever_on,
+  ]);
+  const facingX = [0, 1, 0, -1];
+  const facingZ = [-1, 0, 1, 0];
+
+  // Bounds of the lever alone: the supporting wall is excluded by its tile.
+  const meshLever = (facing, powered, wall = false) => {
+    const blocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
+    blocks[localIndex(8, 10, 8)] = getLeverId(facing, powered);
+    if (wall) {
+      blocks[localIndex(8 - facingX[facing], 10, 8 - facingZ[facing])] = 1;
+    }
+    const mesh = meshChunk(buildPaddedVolume(blocks, () => null), 0, 0).solid;
+    assert.ok(mesh, 'lever should produce geometry');
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    const tiles = new Set();
+    let quads = 0;
+    for (let i = 0; i < mesh.vertexCount; i += 4) {
+      if (!deviceTiles.has(mesh.tiles[i])) continue;
+      quads++;
+      tiles.add(mesh.tiles[i]);
+      for (let v = 0; v < 4; v++) {
+        for (let axis = 0; axis < 3; axis++) {
+          const value = mesh.positions[(i + v) * 3 + axis];
+          min[axis] = Math.min(min[axis], value);
+          max[axis] = Math.max(max[axis], value);
+        }
+      }
+    }
+    return { min, max, quads, tiles };
+  };
+
+  const off = meshLever(2, false);
+  const on = meshLever(2, true);
+  assert.ok(off.quads >= 20 && on.quads >= 20, 'lever is more than a single box');
+  assert.ok(off.tiles.has(TILE.lever_off) && !off.tiles.has(TILE.lever_on));
+  assert.ok(on.tiles.has(TILE.lever_on) && !on.tiles.has(TILE.lever_off));
+  assert.ok(off.tiles.has(TILE.cobblestone) && off.tiles.has(TILE.oak_planks));
+  // Unpowered handle stands up; powering it folds the handle down.
+  assert.ok(off.max[1] - on.max[1] > 0.2, 'off handle is raised, on handle is down');
+  assert.ok(on.max[2] > off.max[2] + 0.1, 'powered handle points along the facing');
+
+  for (const facing of [0, 1, 2, 3]) {
+    const powered = meshLever(facing, true);
+    const axis = facing % 2 === 0 ? 2 : 0;
+    const sign = facing === 1 || facing === 2 ? 1 : -1;
+    const far = sign > 0 ? powered.max[axis] : powered.min[axis];
+    assert.ok(Math.abs(far - (8.5 + sign * 0.3125)) < 1e-6,
+      `facing ${facing} handle must extend outwards`);
+
+    const wall = meshLever(facing, false, true);
+    const near = sign > 0 ? wall.min[axis] : wall.max[axis];
+    assert.ok(Math.abs(near - (8.5 - sign * 0.5)) < 1e-6,
+      `facing ${facing} wall plate must sit flush with the wall`);
+    assert.ok(wall.max[1] > 10.85, `facing ${facing} wall lever handle is raised`);
+    const wallOn = meshLever(facing, true, true);
+    assert.ok(wallOn.min[1] < 10.25, `facing ${facing} wall lever handle drops when powered`);
+  }
 });
 
 await test('redstone devices respond to levers, wires, repeaters and pistons', () => {

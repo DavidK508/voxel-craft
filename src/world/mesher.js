@@ -7,7 +7,7 @@ import {
   SUN_AXIS_Z,
   WORLD_HEIGHT,
 } from '../shared/constants.js';
-import { BLOCKS, BLOCK_DEFS, isRenderable } from '../shared/blocks.js';
+import { BLOCKS, BLOCK_DEFS, HORIZONTAL_OFFSETS, isRenderable } from '../shared/blocks.js';
 import { TILE } from '../shared/textures.js';
 
 const PAD_STRIDE_Z = PAD_X;
@@ -136,6 +136,36 @@ function emitBox(bucket, box, tiles, sky, light) {
   addFace(bucket, 0, -1, x0, z0, z1, y0, y1, tiles[3], sky, light);
   addFace(bucket, 2, 1, z1, x0, x1, y0, y1, tiles[4], sky, light);
   addFace(bucket, 2, -1, z0, x0, x1, y0, y1, tiles[5], sky, light);
+}
+
+/**
+ * Emits an axis-aligned box described in the local frame of a horizontal
+ * facing. `side` runs across the facing and `forward` along it; local zero is
+ * the centre of the cell. Devices such as levers use this so one geometry
+ * description works for every rotation.
+ */
+function emitDirectedBox(bucket, x, y, z, facing, side0, side1, forward0, forward1, y0, y1, tiles, sky, light) {
+  const { x: dx, z: dz } = HORIZONTAL_OFFSETS[facing];
+  const sx = -dz;
+  const sz = dx;
+  const cx = x + 0.5;
+  const cz = z + 0.5;
+  const xs = [
+    cx + side0 * sx + forward0 * dx,
+    cx + side0 * sx + forward1 * dx,
+    cx + side1 * sx + forward0 * dx,
+    cx + side1 * sx + forward1 * dx,
+  ];
+  const zs = [
+    cz + side0 * sz + forward0 * dz,
+    cz + side0 * sz + forward1 * dz,
+    cz + side1 * sz + forward0 * dz,
+    cz + side1 * sz + forward1 * dz,
+  ];
+  emitBox(bucket, [
+    Math.min(...xs), y + y0, Math.min(...zs),
+    Math.max(...xs), y + y1, Math.max(...zs),
+  ], tiles, sky, light);
 }
 
 /** A two-sided diagonal billboard, used for flames. */
@@ -325,14 +355,54 @@ function emitFence(bucket, padded, x, y, z, sky, light) {
   }
 }
 
-function emitLever(bucket, x, y, z, block, sky, light) {
-  const base = allTiles(TILE.lever_off);
-  emitBox(bucket, [x + 0.3125, y + 0.0625, z + 0.3125, x + 0.6875, y + 0.1875, z + 0.6875], base, sky, light);
-  const handle = allTiles(block.powered ? TILE.lever_on : TILE.lever_off);
-  if (block.powered) {
-    emitBox(bucket, [x + 0.4375, y + 0.1875, z + 0.4375, x + 0.5625, y + 0.75, z + 0.5625], handle, sky, light);
-  } else {
-    emitBox(bucket, [x + 0.4375, y + 0.1875, z + 0.5, x + 0.5625, y + 0.375, z + 0.625], handle, sky, light);
+function emitLever(bucket, padded, x, y, z, block, sky, light) {
+  const facing = block.facing & 3;
+  const { x: dx, z: dz } = HORIZONTAL_OFFSETS[facing];
+  // A wall lever stores the wall's outward normal as its facing, so the wall
+  // sits one cell back along -facing. Floor levers have open air there.
+  const behind = BLOCKS[padded[padIndex(x - dx, y, z - dz)]];
+  const onWall = !!(behind && (behind.solid || behind.opaque));
+  const base = allTiles(TILE.cobblestone);
+  const stick = allTiles(TILE.oak_planks);
+  const tip = allTiles(block.powered ? TILE.lever_on : TILE.lever_off);
+  const side0 = -0.0625;
+  const side1 = 0.0625;
+
+  if (!onWall) {
+    // Low plinth on top of the supporting block.
+    emitDirectedBox(bucket, x, y, z, facing,
+      -0.1875, 0.1875, -0.1875, 0.1875, 0.0625, 0.1875, base, sky, light);
+    const segments = block.powered
+      // Powered: flipped down, lying along the facing direction.
+      ? [[-0.0625, 0.0625, 0.1875, 0.3125],
+        [0.0625, 0.1875, 0.1875, 0.3125],
+        [0.1875, 0.3125, 0.1875, 0.3125]]
+      // Unpowered: standing up and leaning towards the facing direction.
+      : [[-0.0625, 0.0625, 0.1875, 0.3125],
+        [0, 0.125, 0.3125, 0.4375],
+        [0.0625, 0.1875, 0.4375, 0.5625]];
+    for (let i = 0; i < segments.length; i++) {
+      const [f0, f1, y0, y1] = segments[i];
+      emitDirectedBox(bucket, x, y, z, facing, side0, side1, f0, f1, y0, y1,
+        i === segments.length - 1 ? tip : stick, sky, light);
+    }
+    return;
+  }
+
+  // Thin plate bolted to the wall face; forward -0.5 is the wall itself.
+  emitDirectedBox(bucket, x, y, z, facing,
+    -0.1875, 0.1875, -0.5, -0.375, 0.3125, 0.6875, base, sky, light);
+  const segments = block.powered
+    ? [[-0.375, -0.25, 0.4375, 0.5625],
+      [-0.25, -0.125, 0.3125, 0.4375],
+      [-0.125, 0, 0.1875, 0.3125]]
+    : [[-0.375, -0.25, 0.5, 0.625],
+      [-0.25, -0.125, 0.625, 0.75],
+      [-0.125, 0, 0.75, 0.875]];
+  for (let i = 0; i < segments.length; i++) {
+    const [f0, f1, y0, y1] = segments[i];
+    emitDirectedBox(bucket, x, y, z, facing, side0, side1, f0, f1, y0, y1,
+      i === segments.length - 1 ? tip : stick, sky, light);
   }
 }
 
@@ -385,7 +455,7 @@ function emitCustom(bucket, padded, x, y, z, block, lightMap, tops) {
   else if (block.bed) emitBed(bucket, x, y, z, block, sky, light);
   else if (block.door) emitDoor(bucket, x, y, z, block, sky, light);
   else if (block.id === FENCE_ID) emitFence(bucket, padded, x, y, z, sky, light);
-  else if (block.lever) emitLever(bucket, x, y, z, block, sky, light);
+  else if (block.lever) emitLever(bucket, padded, x, y, z, block, sky, light);
   else if (block.button) emitButton(bucket, x, y, z, block, sky, light);
   else if (block.plate) emitPlate(bucket, x, y, z, block, sky, light);
   else if (block.wire) emitWire(bucket, x, y, z, block, sky, light);
