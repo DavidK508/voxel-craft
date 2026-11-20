@@ -28,16 +28,36 @@ function isFluid(id) {
  * cubes), but this class remembers a spread level per cell. A placed source is
  * level 0; every step it flows down (a falling column) and sideways up to 7
  * blocks for water or 3 for lava. Cells without a source dry up again, and
- * lava touching water turns into cobblestone/obsidian.
+ * lava touching water turns into cobblestone/obsidian. Water created by the
+ * terrain generator is adopted as an endless source once a neighbouring cell
+ * changes, so oceans, lakes and rivers can flow into freshly opened gaps.
  */
 export class FluidSimulation {
   constructor(world) {
     this.world = world;
     this.levels = new Map();
     this.sources = new Set();
+    // Water placed by the terrain generator starts as an ordinary block. Once a
+    // neighbouring cell changes we adopt it as an endless natural source so it
+    // can flow into the gap instead of sitting there like a solid.
+    this.natural = new Set();
     this.falling = new Set();
     this.queue = new Set();
     this.timer = 0;
+  }
+
+  claimNatural(x, y, z) {
+    const id = this.world.getBlock(x, y, z);
+    if (!isFluid(id)) return;
+    const key = keyOf(x, y, z);
+    if (this.levels.has(key)) {
+      this.queue.add(key);
+      return;
+    }
+    this.levels.set(key, 0);
+    this.natural.add(key);
+    this.falling.delete(key);
+    this.queue.add(key);
   }
 
   setSource(x, y, z, id) {
@@ -45,6 +65,7 @@ export class FluidSimulation {
     const key = keyOf(x, y, z);
     this.levels.set(key, 0);
     this.sources.add(key);
+    this.natural.delete(key);
     this.falling.delete(key);
     this.queue.add(key);
   }
@@ -54,13 +75,15 @@ export class FluidSimulation {
     const key = keyOf(x, y, z);
     this.levels.delete(key);
     this.sources.delete(key);
+    this.natural.delete(key);
     this.falling.delete(key);
   }
 
   /** Wakes the fluid in this cell and its six neighbours. */
   wake(x, y, z) {
     const key = keyOf(x, y, z);
-    if (isFluid(this.world.getBlock(x, y, z))) this.queue.add(key);
+    if (this.levels.has(key)) this.queue.add(key);
+    else this.claimNatural(x, y, z);
     this.wakeNeighbors(x, y, z);
   }
 
@@ -68,10 +91,7 @@ export class FluidSimulation {
     for (const [dx, dy, dz] of [
       [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
     ]) {
-      const nx = x + dx;
-      const ny = y + dy;
-      const nz = z + dz;
-      if (isFluid(this.world.getBlock(nx, ny, nz))) this.queue.add(keyOf(nx, ny, nz));
+      this.claimNatural(x + dx, y + dy, z + dz);
     }
   }
 
@@ -98,20 +118,19 @@ export class FluidSimulation {
       if (!isFluid(id)) {
         this.levels.delete(key);
         this.sources.delete(key);
+        this.natural.delete(key);
         this.falling.delete(key);
         continue;
       }
 
-      // Natural ocean/lake cells are not part of the simulation. They become
-      // active only when a source or a flowing cell is explicitly registered,
-      // which prevents a disturbed lake from flooding the whole world.
       if (!this.levels.has(key)) continue;
 
-      const level = this.levels.get(key) ?? 0;
+      const level = this.levels.get(key);
       if (!this.supported(key, x, y, z, id, level)) {
         this.world.setBlock(x, y, z, 0);
         this.levels.delete(key);
         this.sources.delete(key);
+        this.natural.delete(key);
         this.falling.delete(key);
         this.wakeNeighbors(x, y, z);
         continue;
@@ -123,6 +142,7 @@ export class FluidSimulation {
         this.world.setBlock(x, y, z, level === 0 && this.sources.has(key) ? 25 : 4);
         this.levels.delete(key);
         this.sources.delete(key);
+        this.natural.delete(key);
         this.falling.delete(key);
         this.wakeNeighbors(x, y, z);
         continue;
@@ -133,8 +153,8 @@ export class FluidSimulation {
   }
 
   supported(key, x, y, z, id, level) {
-    // Real sources and untouched natural fluid cells never dry out.
-    if (this.sources.has(key)) return true;
+    // Real sources and natural ocean/river water never dry out.
+    if (this.sources.has(key) || this.natural.has(key)) return true;
     if (level === 0 && !this.falling.has(key)) return true;
     if (this.world.getBlock(x, y + 1, z) === id) return true;
     if (level <= 0) return false;
@@ -201,7 +221,7 @@ export class FluidSimulation {
     for (const [key, level] of this.levels) {
       const { x, y, z } = parseKey(key);
       const id = this.world.getBlock(x, y, z);
-      if (!isFluid(id)) continue;
+      if (!isFluid(id) || this.natural.has(key)) continue;
       result.push([x, y, z, level, this.sources.has(key) ? 1 : 0]);
     }
     return result;
@@ -224,6 +244,7 @@ export class FluidSimulation {
   dispose() {
     this.levels.clear();
     this.sources.clear();
+    this.natural.clear();
     this.falling.clear();
     this.queue.clear();
   }

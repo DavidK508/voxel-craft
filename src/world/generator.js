@@ -3,7 +3,7 @@ import {
   SEA_LEVEL,
   WORLD_HEIGHT,
 } from '../shared/constants.js';
-import { NoiseField, clamp, hash2i, hash3i, smoothstep } from '../shared/noise.js';
+import { NoiseField, clamp, hash2i, hash3i, lerp, smoothstep } from '../shared/noise.js';
 import { getDoorId } from '../shared/blocks.js';
 
 export const BIOME = Object.freeze({
@@ -119,23 +119,41 @@ export class WorldGenerator {
     return this.noise.humidity.fbm2(x * 0.0013 - 54.1, z * 0.0013 + 13.8, 3, 2, 0.5);
   }
 
+  riverStrengthAt(x, z) {
+    const n = this.noise.river.fbm2(x * 0.00145 + 73.4, z * 0.00145 - 19.6, 4, 2.05, 0.5);
+    const wiggle = this.noise.erosion.noise2(x * 0.006 + 11.1, z * 0.006 - 7.4) * 0.018;
+    const width = 0.032 + Math.max(0, this.noise.erosion.noise2(x * 0.0007, z * 0.0007)) * 0.018;
+    return 1 - smoothstep(0, width, Math.abs(n + wiggle));
+  }
+
   heightAt(x, z) {
     const key = `${x},${z}`;
     const cached = this.heightCache.get(key);
     if (cached !== undefined) return cached;
 
-    const continent = this.noise.terrain.fbm2(x * 0.0011, z * 0.0011, 5, 2, 0.5);
-    const hills = this.noise.hills.fbm2(x * 0.0085, z * 0.0085, 4, 2, 0.5);
-    const ridge = this.noise.mountains.ridged2(x * 0.0027 + 4.2, z * 0.0027 - 8.6, 5, 2, 0.5);
-    const mountainMask = smoothstep(0.5, 0.78, ridge * 0.72 + continent * 0.28);
+    const continent = this.noise.terrain.fbm2(x * 0.00105, z * 0.00105, 5, 2, 0.5);
+    const hills = this.noise.hills.fbm2(x * 0.0078, z * 0.0078, 4, 2.05, 0.52);
+    const detail = this.noise.erosion.fbm2(x * 0.022, z * 0.022, 3, 2, 0.5);
+    const ridge = this.noise.mountains.ridged2(x * 0.0025 + 4.2, z * 0.0025 - 8.6, 5, 2, 0.5);
+    const erosion = clamp(this.noise.erosion.fbm2(x * 0.0018 - 40.3, z * 0.0018 + 12.7, 4, 2, 0.5) * 0.5 + 0.5, 0, 1);
+    const mountainMask = smoothstep(0.46, 0.82, ridge * 0.68 + continent * 0.32) * (0.45 + erosion * 0.55);
 
-    let h = SEA_LEVEL + 3 + continent * 19 + hills * 6;
-    h += Math.pow(Math.max(0, ridge - 0.4), 2.1) * 78 * mountainMask;
-    if (continent < -0.28) h -= (-continent - 0.28) * 54;
+    let h = SEA_LEVEL + 4 + continent * 22 + hills * 7 + detail * 1.8;
+    h += Math.pow(Math.max(0, ridge - 0.38), 2.15) * 84 * mountainMask;
+    if (continent < -0.24) h -= (-continent - 0.24) * 58;
 
-    // A soft plateau gives the terrain readable valleys instead of pure noise soup.
+    // Soft plateaus and rolling lowlands make traversal more readable.
     const plateau = this.noise.terrain.noise2(x * 0.00042 + 12.5, z * 0.00042 - 7.1);
-    h += smoothstep(0.35, 0.75, plateau) * 7;
+    h += smoothstep(0.32, 0.78, plateau) * 8;
+
+    // Rivers carve winding channels down to sea level on land.
+    if (continent > -0.18 && h > SEA_LEVEL - 1) {
+      const river = this.riverStrengthAt(x, z);
+      if (river > 0) {
+        const depth = 2.5 + river * 4.5 + Math.max(0, continent) * 1.5;
+        h = lerp(h, SEA_LEVEL - depth, smoothstep(0.02, 0.85, river));
+      }
+    }
 
     const height = clamp(Math.floor(h), 6, WORLD_HEIGHT - 18);
     if (this.heightCache.size > 20000) this.heightCache.clear();

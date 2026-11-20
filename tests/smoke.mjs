@@ -50,6 +50,7 @@ import {
   findSpawn,
   nearbyVillages,
   BIOME_INFO,
+  WorldGenerator,
 } from '../src/world/generator.js';
 import { buildPaddedVolume, meshChunk } from '../src/world/mesher.js';
 import { MOBS } from '../src/entities/mobs.js';
@@ -303,6 +304,77 @@ await test('chunk generation produces valid terrain arrays', () => {
 
   const other = generateChunk(0, 0, seed + 1);
   assert.notEqual(hashBlocks(chunk.blocks), hashBlocks(other.blocks));
+});
+
+await test('overworld carves long water-filled rivers', () => {
+  const seed = 0x1234abcd;
+  const generator = new WorldGenerator(seed);
+  const step = 4;
+  const half = 128;
+  const width = (half * 2) / step;
+  const mask = new Uint8Array(width * width);
+  const coords = [];
+  for (let z = -half; z < half; z += step) {
+    for (let x = -half; x < half; x += step) {
+      const height = generator.heightAt(x, z);
+      if (height < SEA_LEVEL - 2 && generator.riverStrengthAt(x, z) > 0.6) {
+        mask[((z + half) / step) * width + (x + half) / step] = 1;
+        coords.push([x, z]);
+      }
+    }
+  }
+  assert.ok(coords.length > 60, `expected a river, found ${coords.length} cells`);
+
+  // The signal must form one long channel rather than a scatter of ponds.
+  const seen = new Uint8Array(mask.length);
+  let largest = 0;
+  let span = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i] || seen[i]) continue;
+    const queue = [i];
+    seen[i] = 1;
+    let size = 0;
+    let minX = width;
+    let maxX = 0;
+    let minZ = width;
+    let maxZ = 0;
+    while (queue.length) {
+      const cell = queue.pop();
+      const cx = cell % width;
+      const cz = (cell / width) | 0;
+      size++;
+      minX = Math.min(minX, cx);
+      maxX = Math.max(maxX, cx);
+      minZ = Math.min(minZ, cz);
+      maxZ = Math.max(maxZ, cz);
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dz) continue;
+          const nx = cx + dx;
+          const nz = cz + dz;
+          if (nx < 0 || nz < 0 || nx >= width || nz >= width) continue;
+          const next = nz * width + nx;
+          if (mask[next] && !seen[next]) {
+            seen[next] = 1;
+            queue.push(next);
+          }
+        }
+      }
+    }
+    largest = Math.max(largest, size);
+    span = Math.max(span, (maxX - minX) * step, (maxZ - minZ) * step);
+  }
+  assert.ok(largest > 60, `river should be continuous, largest channel has ${largest} cells`);
+  assert.ok(span > 64, `river should run for many blocks, got ${span}`);
+
+  // Carved beds are filled with water up to sea level by the generator.
+  const [wx, wz] = coords[0];
+  const cx = Math.floor(wx / CHUNK_SIZE);
+  const cz = Math.floor(wz / CHUNK_SIZE);
+  const chunk = generateChunk(cx, cz, seed);
+  const lx = wx - cx * CHUNK_SIZE;
+  const lz = wz - cz * CHUNK_SIZE;
+  assert.equal(chunk.blocks[localIndex(lx, SEA_LEVEL, lz)], 11, 'river surface should be water');
 });
 
 await test('redstone ore is generated underground and drops raw redstone', () => {
@@ -991,6 +1063,43 @@ await test('fluids flow downwards and spread sideways', () => {
   fluids.wake(0, 5, 0);
   for (let i = 0; i < 20; i++) fluids.step();
   assert.equal(world.getBlock(0, 4, 0), 0, 'unsupported water must dry up');
+});
+
+await test('water generated with the world flows into opened gaps', () => {
+  const blocks = new Map();
+  const world = {
+    getBlock(x, y, z) {
+      return blocks.get(`${x},${y},${z}`) ?? 0;
+    },
+    setBlock(x, y, z, id) {
+      const key = `${x},${y},${z}`;
+      if ((blocks.get(key) ?? 0) === id) return false;
+      if (id === 0) blocks.delete(key);
+      else blocks.set(key, id);
+      return true;
+    },
+  };
+  const fluids = new FluidSimulation(world);
+
+  // Ordinary generator output: no bucket, no saved fluid level.
+  world.setBlock(0, 0, 0, 4);
+  world.setBlock(1, 0, 0, 4);
+  world.setBlock(0, 1, 0, 11);
+  fluids.remove(1, 1, 0);
+  fluids.wake(1, 1, 0);
+  fluids.step();
+  assert.equal(world.getBlock(1, 1, 0), 11, 'natural water should flood the opened cell');
+  assert.ok(
+    !fluids.serialize().some(([x, y, z]) => x === 0 && y === 1 && z === 0),
+    'natural water should not be saved as a player source',
+  );
+  for (let i = 0; i < 20; i++) fluids.step();
+  assert.equal(world.getBlock(0, 1, 0), 11, 'natural water should stay a stable source');
+
+  world.setBlock(2, 4, 0, 11);
+  fluids.wake(2, 3, 0);
+  fluids.step();
+  assert.equal(world.getBlock(2, 3, 0), 11, 'natural water should fall into a hole');
 });
 
 await test('player lands on the ground and cannot fall through', () => {

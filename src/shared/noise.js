@@ -232,5 +232,7 @@ export class NoiseField {
     this.caveB = new SimplexNoise(this.seed ^ 0xfd7046c5);
     this.caveC = new SimplexNoise(this.seed ^ 0xb55a4f09);
     this.ore = new SimplexNoise(this.seed ^ 0x68e31da4);
+    this.river = new SimplexNoise(this.seed ^ 0x51f4d3a2);
+    this.erosion = new SimplexNoise(this.seed ^ 0x243f6a88);
   }
 }
