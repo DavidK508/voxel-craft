@@ -40,6 +40,11 @@ export class CharacterPreview {
     this.model?.setAppearance(appearance);
   }
 
+  /** Rebuilds from the Blender GLB once the async loader finishes. */
+  refreshModel() {
+    this.model?.refreshModel();
+  }
+
   setArmor(stacks) {
     if (!this.model) return;
     const mapped = (stacks ?? []).map((stack) => {

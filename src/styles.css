@@ -682,7 +682,7 @@ input {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 5px;
-  max-height: 300px;
+  max-height: min(300px, 38dvh);
   overflow-y: auto;
   padding-right: 4px;
   scrollbar-width: thin;
@@ -1196,8 +1196,10 @@ input {
 /* ---------- Inventory ---------- */
 
 .inventory-screen {
+  --slot-size: 48px;
   display: grid;
   place-items: center;
+  padding: 12px;
   background: rgba(3, 6, 8, 0.62);
   backdrop-filter: blur(4px);
   z-index: 35;
@@ -1205,10 +1207,10 @@ input {
 }
 
 .inventory-panel {
-  width: min(700px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  width: min(1080px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
   overflow: auto;
-  padding: 20px;
+  padding: clamp(12px, 1.6vw, 20px);
   border: 2px solid #59616a;
   border-radius: 5px;
   background:
@@ -1255,17 +1257,19 @@ input {
 }
 
 .inventory-body {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 28px;
-  margin-bottom: 18px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(10px, 1.6vw, 24px);
+  margin-bottom: 14px;
 }
 
 .crafting-area {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 14px;
+  min-width: 0;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 3px;
@@ -1284,8 +1288,8 @@ input {
 }
 
 .result-slot {
-  width: 56px;
-  height: 56px;
+  width: calc(var(--slot-size) + 8px);
+  height: calc(var(--slot-size) + 8px);
   border-color: #6f6550;
   background:
     linear-gradient(180deg, rgba(255, 235, 160, 0.08), transparent),
@@ -1316,7 +1320,7 @@ input {
 
 .armor-slots {
   display: grid;
-  grid-template-columns: repeat(4, 48px);
+  grid-template-columns: repeat(4, var(--slot-size));
   gap: 3px;
 }
 
@@ -1329,9 +1333,20 @@ input {
 
 .inventory-grid {
   display: grid;
-  grid-template-columns: repeat(9, 48px);
+  grid-template-columns: repeat(9, var(--slot-size));
   gap: 3px;
   justify-content: center;
+}
+
+/* Every slot inside the panel follows the monitor-derived size. */
+.inventory-screen .slot {
+  width: var(--slot-size);
+  height: var(--slot-size);
+}
+
+.inventory-screen .result-slot {
+  width: calc(var(--slot-size) + 8px);
+  height: calc(var(--slot-size) + 8px);
 }
 
 .inventory-hotbar {
@@ -1383,7 +1398,7 @@ input {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
   gap: 6px;
-  max-height: 244px;
+  max-height: min(244px, 32dvh);
   overflow-y: auto;
   padding-right: 4px;
   scrollbar-width: thin;
@@ -1538,6 +1553,54 @@ input {
   text-overflow: ellipsis;
 }
 
+/* Mid-size monitors: shrink the preview and the scroll areas, keep columns. */
+.inventory-screen.compact-inventory .inventory-body {
+  gap: 10px;
+}
+
+.inventory-screen.compact-inventory .character-preview {
+  width: 108px;
+  height: 156px;
+  flex-basis: 108px;
+}
+
+.inventory-screen.compact-inventory .character-preview-canvas {
+  width: 108px;
+  height: 156px;
+}
+
+.inventory-screen.compact-inventory .crafting-area {
+  gap: 8px;
+  padding: 8px;
+}
+
+.inventory-screen.compact-inventory .recipe-list {
+  max-height: min(180px, 24dvh);
+}
+
+.inventory-screen.compact-inventory .creative-grid {
+  max-height: min(220px, 28dvh);
+}
+
+/* Small/low monitors: everything in a single column, preview hidden. */
+.inventory-screen.tiny-inventory .inventory-body {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+
+.inventory-screen.tiny-inventory .character-preview {
+  display: none;
+}
+
+.inventory-screen.tiny-inventory .recipe-list {
+  max-height: min(140px, 20dvh);
+}
+
+.inventory-screen.tiny-inventory .creative-grid {
+  max-height: min(170px, 22dvh);
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+}
+
 .cursor-stack {
   position: fixed;
   z-index: 100;
@@ -1673,13 +1736,17 @@ input {
   }
 
   .inventory-body {
-    flex-direction: column;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .character-preview {
+    display: none;
   }
 
   .recipe-list {
     grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
-    max-height: 200px;
+    max-height: min(200px, 24dvh);
   }
 
   .stat-row {

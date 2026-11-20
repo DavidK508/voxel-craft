@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createMobModel } from './modelLoader.js';
 
 const materialCache = new Map();
 const geometryCache = new Map();
@@ -360,8 +361,8 @@ const builders = {
 };
 
 export function buildMobModel(key) {
-  const builder = builders[key] ?? builders.pig;
-  return builder();
+  // Blender GLB first; procedural boxes stay as the fallback.
+  return createMobModel(key) ?? (builders[key] ?? builders.pig)();
 }
 
 export function disposeMobModel(model) {

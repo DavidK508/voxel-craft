@@ -23,6 +23,7 @@ import {
   isDaytime,
 } from './dayCycle.js';
 import { EntityManager } from '../entities/EntityManager.js';
+import { preloadModels } from '../entities/modelLoader.js';
 import { Inventory } from './Inventory.js';
 import { ItemDrops } from './ItemDrops.js';
 import { Input } from '../player/Input.js';
@@ -204,6 +205,13 @@ export class Game {
     this.playerModel = new PlayerModel('', this.appearance);
     this.playerModel.group.visible = false;
     this.scene.add(this.playerModel.group);
+
+    // Models load in the background; the procedural versions cover the gap.
+    preloadModels().then(() => {
+      this.playerModel?.refreshModel();
+      this.inventoryUI?.preview?.refreshModel();
+      this.characterCreator?.preview?.refreshModel();
+    });
     // 0 = first person, 1 = third person behind, 2 = third person in front.
     this.cameraMode = 0;
 
@@ -1707,6 +1715,9 @@ export class Game {
     gameMode = null,
   } = {}) {
     if (this.state === 'loading') return;
+
+    // Mob spawning must see the loaded GLBs, not the procedural fallback.
+    await preloadModels();
 
     this.disposeWorld();
     this.currentWorldId = world ?? null;

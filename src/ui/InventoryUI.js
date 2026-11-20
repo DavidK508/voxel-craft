@@ -71,6 +71,10 @@ export class InventoryUI {
     this.lastHoverKey = null;
     this.preview = new CharacterPreview($('character-preview'));
 
+    window.addEventListener('resize', () => {
+      if (this.openState) this.fitInventory();
+    });
+
     this.buildPermanentSlots();
     this.buildCursorView();
     this.bindEvents();
@@ -232,7 +236,7 @@ export class InventoryUI {
       if (old) old.element.remove();
       this.views.delete(key);
     }
-    this.craftGridEl.style.gridTemplateColumns = `repeat(${this.craftingSize}, 48px)`;
+    this.craftGridEl.style.gridTemplateColumns = `repeat(${this.craftingSize}, var(--slot-size))`;
     for (let i = 0; i < this.craftingSize * this.craftingSize; i++) {
       const element = this.createSlotElement('craft', i);
       this.craftGridEl.appendChild(element);
@@ -461,6 +465,19 @@ export class InventoryUI {
     return true;
   }
 
+  /** Scales slots to the actual monitor/window so nothing overlaps. */
+  fitInventory() {
+    if (!this.screen) return;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const byWidth = Math.floor((width - 120) / 9);
+    const byHeight = Math.floor((height - 240) / 9);
+    const slot = Math.max(28, Math.min(48, Math.min(byWidth, byHeight)));
+    this.screen.style.setProperty('--slot-size', `${slot}px`);
+    this.screen.classList.toggle('compact-inventory', width < 1120 || height < 720);
+    this.screen.classList.toggle('tiny-inventory', width < 860 || height < 620);
+  }
+
   open(size = 2, options = {}) {
     if (this.openState) this.close();
     this.creative = options.creative === true;
@@ -483,6 +500,7 @@ export class InventoryUI {
       this.buildCraftingGrid();
       this.buildRecipeList();
     }
+    this.fitInventory();
     this.openState = true;
     this.screen.classList.remove('hidden');
     this.tooltipEl.classList.add('hidden');

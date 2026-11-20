@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { normalizeAppearance } from '../shared/appearance.js';
+import {
+  createPlayerModel,
+  hasPlayerModel,
+} from '../entities/modelLoader.js';
 
 const materialCache = new Map();
+const flatCache = new Map();
 
 // BoxGeometry material order: +X, -X, +Y, -Y, +Z, -Z. A tiny fake light on
 // each face makes the blocky avatars readable without adding real lights.
@@ -14,6 +19,15 @@ function material(color, shade = 1) {
     const tinted = new THREE.Color(color).multiplyScalar(shade);
     mat = new THREE.MeshBasicMaterial({ color: tinted, fog: true });
     materialCache.set(key, mat);
+  }
+  return mat;
+}
+
+function flat(color) {
+  let mat = flatCache.get(color);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({ color, fog: true });
+    flatCache.set(color, mat);
   }
   return mat;
 }
@@ -45,6 +59,7 @@ const ARMOR_COLORS = {
 
 /**
  * A blocky avatar for third person, LAN players and the character creator.
+ * Uses the Blender GLB when available and procedural boxes otherwise.
  * Faces -Z at yaw 0, exactly like Player.getDirection().
  */
 export class PlayerModel {
@@ -55,67 +70,99 @@ export class PlayerModel {
     this.sneakAmount = 0;
     this.name = '';
     this.appearance = normalizeAppearance(appearance);
-    const look = this.appearance;
+    this.appliedAppearance = this.appearance;
+    this.usesGLB = false;
+    this.appliedArmor = [];
+    this.buildBody(this.appearance, createPlayerModel());
 
-    this.body = new THREE.Group();
-    this.body.position.y = 1.08;
-    this.group.add(this.body);
-    this.shirtMesh = box(this.body, 0.54, 0.72, 0.3, look.shirt);
-    box(this.body, 0.56, 0.09, 0.32, 0x2c2f36, 0, -0.28, 0);
-    this.accentMesh = box(this.body, 0.2, 0.07, 0.32, look.accent, 0, 0.33, -0.01);
+    this.nameTag = this.buildNameTag();
+    this.group.add(this.nameTag);
+    this.setName(name);
+  }
 
-    this.head = new THREE.Group();
-    this.head.position.y = 1.44;
-    this.group.add(this.head);
+  buildBody(look, glb) {
+    this.shirtMesh = null;
+    this.accentMesh = null;
     this.skinMeshes = [];
-    const skinBox = (w, h, d, x, y, z) => {
-      const mesh = box(this.head, w, h, d, look.skinTone, x, y, z);
-      this.skinMeshes.push(mesh);
-      return mesh;
-    };
-    skinBox(0.48, 0.48, 0.48, 0, 0.23, 0);
-    // Eyes: white sclera with dark pupils on the -Z face.
-    box(this.head, 0.12, 0.11, 0.02, 0xf5f1e6, -0.115, 0.28, -0.25);
-    box(this.head, 0.12, 0.11, 0.02, 0xf5f1e6, 0.115, 0.28, -0.25);
-    box(this.head, 0.055, 0.07, 0.025, 0x33435c, -0.105, 0.275, -0.265);
-    box(this.head, 0.055, 0.07, 0.025, 0x33435c, 0.125, 0.275, -0.265);
-    this.browMeshes = [
-      box(this.head, 0.11, 0.025, 0.02, look.hairTint, -0.115, 0.355, -0.255),
-      box(this.head, 0.11, 0.025, 0.02, look.hairTint, 0.115, 0.355, -0.255),
-    ];
-    skinBox(0.08, 0.1, 0.07, 0, 0.19, -0.26);
-    box(this.head, 0.17, 0.035, 0.02, 0x8d5245, 0, 0.09, -0.25);
+    this.browMeshes = [];
+    this.sleeveMeshes = [];
+    this.pantMeshes = [];
 
-    // Hairstyle is rebuilt on demand by setAppearance().
+    if (glb) {
+      this.usesGLB = true;
+      this.body = glb.body;
+      this.head = glb.head;
+      this.leftArm = glb.leftArm;
+      this.rightArm = glb.rightArm;
+      this.leftLeg = glb.leftLeg;
+      this.rightLeg = glb.rightLeg;
+      this.group.add(glb.group);
+      this.shirtMesh = glb.roles.shirt.find((m) => m.name.startsWith('shirt_body')) ?? null;
+      this.accentMesh = glb.roles.accent[0] ?? null;
+      this.skinMeshes = [...glb.roles.skin];
+      this.browMeshes = [...glb.roles.brow];
+      this.sleeveMeshes = glb.roles.shirt.filter((m) => m.name.startsWith('shirt_sleeve'));
+      this.pantMeshes = glb.roles.pants.filter((m) => m.name.startsWith('pants_leg'));
+    } else {
+      this.usesGLB = false;
+      this.body = new THREE.Group();
+      this.body.position.y = 1.08;
+      this.group.add(this.body);
+      this.shirtMesh = box(this.body, 0.54, 0.72, 0.3, look.shirt);
+      box(this.body, 0.56, 0.09, 0.32, 0x2c2f36, 0, -0.28, 0);
+      this.accentMesh = box(this.body, 0.2, 0.07, 0.32, look.accent, 0, 0.33, -0.01);
+
+      this.head = new THREE.Group();
+      this.head.position.y = 1.44;
+      this.group.add(this.head);
+      const skinBox = (w, h, d, x, y, z) => {
+        const mesh = box(this.head, w, h, d, look.skinTone, x, y, z);
+        this.skinMeshes.push(mesh);
+        return mesh;
+      };
+      skinBox(0.48, 0.48, 0.48, 0, 0.23, 0);
+      box(this.head, 0.12, 0.11, 0.02, 0xf5f1e6, -0.115, 0.28, -0.25);
+      box(this.head, 0.12, 0.11, 0.02, 0xf5f1e6, 0.115, 0.28, -0.25);
+      box(this.head, 0.055, 0.07, 0.025, 0x33435c, -0.105, 0.275, -0.265);
+      box(this.head, 0.055, 0.07, 0.025, 0x33435c, 0.125, 0.275, -0.265);
+      this.browMeshes = [
+        box(this.head, 0.11, 0.025, 0.02, look.hairTint, -0.115, 0.355, -0.255),
+        box(this.head, 0.11, 0.025, 0.02, look.hairTint, 0.115, 0.355, -0.255),
+      ];
+      skinBox(0.08, 0.1, 0.07, 0, 0.19, -0.26);
+      box(this.head, 0.17, 0.035, 0.02, 0x8d5245, 0, 0.09, -0.25);
+
+      this.leftArm = new THREE.Group();
+      this.leftArm.position.set(-0.35, 1.4, 0);
+      this.group.add(this.leftArm);
+      this.rightArm = new THREE.Group();
+      this.rightArm.position.set(0.35, 1.4, 0);
+      this.group.add(this.rightArm);
+      for (const arm of [this.leftArm, this.rightArm]) {
+        this.sleeveMeshes.push(box(arm, 0.18, 0.28, 0.2, look.shirt, 0, -0.13, 0));
+        this.skinMeshes.push(box(arm, 0.16, 0.4, 0.18, look.skinTone, 0, -0.46, 0));
+      }
+
+      this.leftLeg = new THREE.Group();
+      this.leftLeg.position.set(-0.13, 0.72, 0);
+      this.group.add(this.leftLeg);
+      this.rightLeg = new THREE.Group();
+      this.rightLeg.position.set(0.13, 0.72, 0);
+      this.group.add(this.rightLeg);
+      for (const leg of [this.leftLeg, this.rightLeg]) {
+        this.pantMeshes.push(box(leg, 0.22, 0.72, 0.23, look.pants, 0, -0.36, 0));
+        box(leg, 0.24, 0.14, 0.28, 0x403223, 0, -0.65, -0.02);
+      }
+    }
+
     this.hair = new THREE.Group();
     this.head.add(this.hair);
     this.buildHair();
+    this.buildArmor();
+    this.applyLook(look);
+  }
 
-    this.leftArm = new THREE.Group();
-    this.leftArm.position.set(-0.35, 1.4, 0);
-    this.group.add(this.leftArm);
-    this.rightArm = new THREE.Group();
-    this.rightArm.position.set(0.35, 1.4, 0);
-    this.group.add(this.rightArm);
-    this.sleeveMeshes = [];
-    for (const arm of [this.leftArm, this.rightArm]) {
-      this.sleeveMeshes.push(box(arm, 0.18, 0.28, 0.2, look.shirt, 0, -0.13, 0));
-      this.skinMeshes.push(box(arm, 0.16, 0.4, 0.18, look.skinTone, 0, -0.46, 0));
-    }
-
-    this.leftLeg = new THREE.Group();
-    this.leftLeg.position.set(-0.13, 0.72, 0);
-    this.group.add(this.leftLeg);
-    this.rightLeg = new THREE.Group();
-    this.rightLeg.position.set(0.13, 0.72, 0);
-    this.group.add(this.rightLeg);
-    this.pantMeshes = [];
-    for (const leg of [this.leftLeg, this.rightLeg]) {
-      this.pantMeshes.push(box(leg, 0.22, 0.72, 0.23, look.pants, 0, -0.36, 0));
-      box(leg, 0.24, 0.14, 0.28, 0x403223, 0, -0.65, -0.02);
-    }
-
-    // Armor overlays, hidden until a matching piece is equipped.
+  buildArmor() {
     this.armor = {
       head: overlay(this.head, 0.52, 0.52, 0.52, 0, 0.23, 0),
       chest: overlay(this.body, 0.58, 0.58, 0.34, 0, 0.05, 0),
@@ -139,11 +186,19 @@ export class PlayerModel {
       legs: [],
       feet: [],
     };
-    this.setArmor([]);
+    this.setArmor(this.appliedArmor);
+  }
 
-    this.nameTag = this.buildNameTag();
-    this.group.add(this.nameTag);
-    this.setName(name);
+  /** Swaps procedural geometry for the Blender model once it finishes loading. */
+  refreshModel() {
+    if (this.usesGLB || !hasPlayerModel()) return;
+    const glb = createPlayerModel();
+    if (!glb?.body || !glb?.head) return;
+    for (const part of [this.body, this.head, this.leftArm, this.rightArm, this.leftLeg, this.rightLeg]) {
+      part.removeFromParent();
+    }
+    this.buildBody(this.appearance, glb);
+    this.setName(this.name);
   }
 
   buildHair() {
@@ -222,16 +277,12 @@ export class PlayerModel {
     sprite.visible = Boolean(this.name);
   }
 
-  setAppearance(appearance) {
-    const next = normalizeAppearance(appearance);
-    const previous = this.appliedAppearance;
-    if (previous && previous.outfit === next.outfit && previous.skin === next.skin
-      && previous.hairStyle === next.hairStyle && previous.hairColor === next.hairColor) return;
-    this.appliedAppearance = next;
-    this.appearance = next;
-    const look = this.appearance;
+  applyLook(look) {
+    const cached = new Set([...materialCache.values(), ...flatCache.values()]);
     const paint = (mesh, color) => {
-      if (mesh) mesh.material = shaded(color);
+      if (!mesh) return;
+      if (this.usesGLB && !cached.has(mesh.material)) mesh.material.dispose?.();
+      mesh.material = this.usesGLB ? flat(color) : shaded(color);
     };
     paint(this.shirtMesh, look.shirt);
     paint(this.accentMesh, look.accent);
@@ -239,10 +290,21 @@ export class PlayerModel {
     for (const mesh of this.pantMeshes) paint(mesh, look.pants);
     for (const mesh of this.skinMeshes) paint(mesh, look.skinTone);
     for (const mesh of this.browMeshes) paint(mesh, look.hairTint);
+  }
+
+  setAppearance(appearance) {
+    const next = normalizeAppearance(appearance);
+    const previous = this.appliedAppearance;
+    if (previous && previous.outfit === next.outfit && previous.skin === next.skin
+      && previous.hairStyle === next.hairStyle && previous.hairColor === next.hairColor) return;
+    this.appliedAppearance = next;
+    this.appearance = next;
+    this.applyLook(next);
     this.buildHair();
   }
 
   setArmor(stacks = []) {
+    this.appliedArmor = stacks;
     const bySlot = {
       head: stacks[0],
       chest: stacks[1],
@@ -294,10 +356,11 @@ export class PlayerModel {
   }
 
   dispose() {
-    const cached = new Set(materialCache.values());
+    const cached = new Set([...materialCache.values(), ...flatCache.values()]);
     this.group.traverse((child) => {
       if (!child.isMesh) return;
-      child.geometry?.dispose?.();
+      // GLB clones share their geometry with the cached original.
+      if (!child.userData.sharedGeometry) child.geometry?.dispose?.();
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const mat of materials) {
         if (mat && !cached.has(mat)) mat.dispose?.();

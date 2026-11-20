@@ -34,13 +34,24 @@
       "preload.js",
       "index.html",
       "src/**/*",
+      "assets/models/**/*",
       "node_modules/three/build/three.module.js",
+      "node_modules/three/examples/jsm/**/*",
       "package.json"
     ],
     "linux": {
       "target": [
         "deb",
-        "AppImage"
+        "AppImage",
+        "rpm",
+        "pacman",
+        "apk",
+        "freebsd",
+        "p5p",
+        "tar.gz",
+        "tar.xz",
+        "zip",
+        "7z"
       ],
       "category": "Game",
       "maintainer": "VoxelCraft <voxelcraft@example.com>",
