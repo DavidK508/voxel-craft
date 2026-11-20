@@ -221,75 +221,42 @@ function emitTorchShape(bucket, x, y, z, block, sky, light) {
 const allTiles = (tile) => [tile, tile, tile, tile, tile, tile];
 
 function emitBed(bucket, x, y, z, block, sky, light) {
-  const alongX = block.facing === 1 || block.facing === 3;
+  const facing = block.facing & 3;
   const wood = allTiles(TILE.oak_planks);
   const mattress = allTiles(TILE.bed_side);
   mattress[0] = TILE.bed_top;
   mattress[1] = TILE.oak_planks;
 
-  // Four short legs and a thin platform instead of one chunky box.
-  for (const lx of [0.0625, 0.8125]) {
-    for (const lz of [0.0625, 0.8125]) {
-      emitBox(bucket, [
-        x + lx, y + 0.0625, z + lz,
-        x + lx + 0.125, y + 0.375, z + lz + 0.125,
-      ], wood, sky, light);
-    }
+  // The head is one cell along the facing from the foot. Each half fills its
+  // whole cell along that axis, so the frames and mattresses meet exactly at
+  // the boundary instead of leaving a gap between two separate-looking beds.
+  const outerStart = block.head ? 0.375 : -0.5;
+  const outerEnd = block.head ? 0.5 : -0.375;
+
+  // Two legs at the outer end of each half: four for the complete bed.
+  for (const side of [-0.4375, 0.3125]) {
+    emitDirectedBox(bucket, x, y, z, facing, side, side + 0.125,
+      outerStart, outerStart + 0.125, 0.0625, 0.375, wood, sky, light);
   }
-  emitBox(bucket, [
-    x + 0.0625, y + 0.375, z + 0.0625,
-    x + 0.9375, y + 0.4375, z + 0.9375,
-  ], wood, sky, light);
 
-  // The mattress is a thin slab on top of the frame.
-  emitBox(bucket, [
-    x + 0.125, y + 0.4375, z + 0.125,
-    x + 0.875, y + 0.5625, z + 0.875,
-  ], mattress, sky, light);
+  // Continuous frame and thin mattress across the full cell.
+  emitDirectedBox(bucket, x, y, z, facing, -0.4375, 0.4375, -0.5, 0.5,
+    0.375, 0.4375, wood, sky, light);
+  emitDirectedBox(bucket, x, y, z, facing, -0.375, 0.375, -0.5, 0.5,
+    0.4375, 0.5625, mattress, sky, light);
 
-  // A raised board at the outer end of the bed (headboard / footboard).
+  // Only the outer end of the whole bed gets a raised board.
   const boardTop = block.head ? 0.8125 : 0.75;
-  if (alongX) {
-    const bx = block.head
-      ? (block.facing === 1 ? x + 0.8125 : x + 0.0625)
-      : (block.facing === 1 ? x + 0.0625 : x + 0.8125);
-    emitBox(bucket, [
-      bx, y + 0.4375, z + 0.0625,
-      bx + 0.125, y + boardTop, z + 0.9375,
-    ], wood, sky, light);
-  } else {
-    const bz = block.head
-      ? (block.facing === 2 ? z + 0.8125 : z + 0.0625)
-      : (block.facing === 2 ? z + 0.0625 : z + 0.8125);
-    emitBox(bucket, [
-      x + 0.0625, y + 0.4375, bz,
-      x + 0.9375, y + boardTop, bz + 0.125,
-    ], wood, sky, light);
-  }
+  emitDirectedBox(bucket, x, y, z, facing, -0.4375, 0.4375,
+    outerStart, outerEnd, 0.4375, boardTop, wood, sky, light);
 
-  // A pillow on the head cell, and a raised blanket on the foot cell, make
-  // the two halves read as one long bed rather than two blocks.
+  // Pillow by the headboard, blanket on the foot half.
   if (block.head) {
-    const pillow = allTiles(TILE.white_wool);
-    if (alongX) {
-      const px = block.facing === 1 ? x + 0.5625 : x + 0.1875;
-      emitBox(bucket, [
-        px, y + 0.5625, z + 0.1875,
-        px + 0.25, y + 0.625, z + 0.8125,
-      ], pillow, sky, light);
-    } else {
-      const pz = block.facing === 2 ? z + 0.5625 : z + 0.1875;
-      emitBox(bucket, [
-        x + 0.1875, y + 0.5625, pz,
-        x + 0.8125, y + 0.625, pz + 0.25,
-      ], pillow, sky, light);
-    }
+    emitDirectedBox(bucket, x, y, z, facing, -0.3125, 0.3125,
+      0.125, 0.375, 0.5625, 0.625, allTiles(TILE.white_wool), sky, light);
   } else {
-    const blanket = allTiles(TILE.red_wool);
-    emitBox(bucket, [
-      x + 0.1875, y + 0.5625, z + 0.1875,
-      x + 0.8125, y + 0.625, z + 0.8125,
-    ], blanket, sky, light);
+    emitDirectedBox(bucket, x, y, z, facing, -0.3125, 0.3125,
+      -0.375, 0.125, 0.5625, 0.625, allTiles(TILE.red_wool), sky, light);
   }
 }
 

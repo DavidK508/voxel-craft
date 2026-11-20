@@ -305,6 +305,20 @@ await test('chunk generation produces valid terrain arrays', () => {
   assert.notEqual(hashBlocks(chunk.blocks), hashBlocks(other.blocks));
 });
 
+await test('redstone ore is generated underground and drops raw redstone', () => {
+  let ore = 0;
+  for (let cz = -1; cz <= 1; cz++) {
+    for (let cx = -1; cx <= 1; cx++) {
+      const { blocks } = generateChunk(cx, cz, 0x1234abcd);
+      for (let i = 0; i < blocks.length; i++) {
+        if (blocks[i] === 182) ore++;
+      }
+    }
+  }
+  assert.ok(ore > 0, 'redstone ore must be findable in the ground');
+  assert.deepEqual(getBlock(182).drops, [{ id: 449, count: 1 }]);
+});
+
 await test('spawn search returns a safe land position', () => {
   const seed = 424242;
   const spawn = findSpawn(seed);
@@ -522,6 +536,28 @@ await test('decorative blocks use rectangular, non-cube geometry', () => {
   const head = meshSingleBlock(getBedId(0, true));
   assert.ok(head.mesh.tiles.includes(TILE.white_wool), 'head has a separate pillow');
   assert.ok(head.size[1] > bed.size[1], 'headboard rises above the footboard');
+
+  // Both halves must fill their own cell along the bed axis so the joined
+  // bed has no gap in the middle, and only the outer ends get raised boards.
+  const southFoot = meshSingleBlock(getBedId(2, false), 8, 10, 8);
+  const southHead = meshSingleBlock(getBedId(2, true), 8, 10, 9);
+  assert.ok(Math.abs(southFoot.min[2] - 8) < 1e-6
+    && Math.abs(southFoot.max[2] - 9) < 1e-6, 'foot half fills its cell along the bed axis');
+  assert.ok(Math.abs(southHead.min[2] - 9) < 1e-6
+    && Math.abs(southHead.max[2] - 10) < 1e-6, 'head half meets the foot at the shared boundary');
+  const highZ = (mesh, minY) => {
+    const values = [];
+    for (let i = 0; i < mesh.vertexCount; i++) {
+      if (mesh.positions[i * 3 + 1] > minY) values.push(mesh.positions[i * 3 + 2]);
+    }
+    return values;
+  };
+  const footBoards = highZ(southFoot.mesh, 10.7);
+  const headBoards = highZ(southHead.mesh, 10.78);
+  assert.ok(footBoards.length > 0 && footBoards.every((z) => z < 8.25),
+    'footboard must sit at the outer end, not at the seam');
+  assert.ok(headBoards.length > 0 && headBoards.every((z) => z > 9.75),
+    'headboard must sit at the outer end, not at the seam');
 
   const fence = meshSingleBlock(68);
   assert.ok(Math.abs(fence.size[0] - 0.25) < 1e-6, 'fence post is thin in X');
