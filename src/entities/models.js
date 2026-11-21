@@ -90,6 +90,22 @@ const builders = {
       snout: [0.24, 0.2, 0.18, 0xd97f92], ears: 0xe89aa8, tail: [0.08, 0.08, 0.08, 0xd88a98],
     });
   },
+  nether_pig() {
+    const model = quadruped({
+      bodyColor: 0x7a1e1e, headColor: 0x942727, legColor: 0x5c1414,
+      bodySize: [0.86, 0.66, 1.12], legHeight: 0.36, headSize: [0.54, 0.52, 0.54],
+      bodyY: 0.68, headZ: -0.76,
+      snout: [0.28, 0.22, 0.2, 0x4a1010], ears: 0x942727, tail: [0.08, 0.12, 0.08, 0x5c1414],
+      extra(group, head, bodyY, bh) {
+        box(head, 0.1, 0.09, 0.03, 0xffb02e, -0.16, 0.08, -0.28);
+        box(head, 0.1, 0.09, 0.03, 0xffb02e, 0.16, 0.08, -0.28);
+        for (let i = -1; i <= 1; i++) {
+          box(group, 0.09, 0.22, 0.09, 0xff6a1e, 0, bodyY + bh / 2 + 0.08, i * 0.28);
+        }
+      },
+    });
+    return model;
+  },
   sheep() {
     const model = quadruped({
       bodyColor: 0xf2f0e6, headColor: 0xd8cab4, legColor: 0xc8bca8,
@@ -357,6 +373,44 @@ const builders = {
       rods.push(pivot);
     }
     return { group, legs: [], rods, head: null };
+  },
+  hell_lord() {
+    const group = new THREE.Group();
+    const legs = [];
+    for (const side of [-1, 1]) {
+      legs.push(leg(group, side * 0.42, 1.15, 0, 0.42, 1.15, 0.5, 0x4a0e12));
+    }
+    box(group, 1.7, 1.25, 1.0, 0x7d1a1c, 0, 1.85, 0);
+    box(group, 1.2, 0.45, 0.8, 0x9c2420, 0, 1.3, 0);
+
+    const arms = [];
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.position.set(side * 1.05, 2.28, 0);
+      box(arm, 0.42, 1.25, 0.48, 0x6d1518, 0, -0.62, 0);
+      box(arm, 0.5, 0.4, 0.56, 0x9c2420, 0, -1.25, 0);
+      group.add(arm);
+      arms.push(arm);
+    }
+
+    const head = new THREE.Group();
+    head.position.set(0, 2.75, 0);
+    box(head, 0.95, 0.9, 0.9, 0x9c2420);
+    box(head, 0.55, 0.34, 0.3, 0x521014, 0, -0.16, -0.55);
+    box(head, 0.14, 0.11, 0.04, 0xffd257, -0.24, 0.12, -0.47);
+    box(head, 0.14, 0.11, 0.04, 0xffd257, 0.24, 0.12, -0.47);
+    box(head, 0.18, 0.6, 0.18, 0xe8c98a, -0.42, 0.62, 0);
+    box(head, 0.18, 0.6, 0.18, 0xe8c98a, 0.42, 0.62, 0);
+    box(head, 0.9, 0.18, 0.9, 0xf0b429, 0, 0.56, 0);
+    for (let i = -1; i <= 1; i++) {
+      box(head, 0.14, 0.3, 0.14, 0xf0b429, i * 0.3, 0.78, 0);
+    }
+    group.add(head);
+
+    for (let i = -2; i <= 2; i++) {
+      box(group, 0.16, 0.5, 0.16, 0xff6a1e, i * 0.28, 2.5, 0.45);
+    }
+    return { group, legs, arms, head };
   },
 };
 

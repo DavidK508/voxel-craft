@@ -1871,6 +1871,8 @@ export class Game {
         seed: worldSeed,
         audio: this.audio,
       });
+      this.entities.onBossSpawn = (boss) => this.hud.toast(`${boss.name} пробудился в Аду!`, 3200);
+      this.entities.onBossDefeat = (boss) => this.hud.toast(`${boss.name} побеждён!`, 3400);
       this.selection = this.createSelectionBox();
 
       if (loadedSave) {
@@ -2183,6 +2185,7 @@ export class Game {
     this.riding = null;
     this.hud.setBreakProgress(0);
     this.hud.setUnderwater(false);
+    this.hud.clearBoss();
     this.hud.setDebug(false);
     this.lastDebugVisible = false;
     this.disposingWorld = false;
@@ -3232,6 +3235,11 @@ export class Game {
     }
     if (!this.isCreative()) this.inventory.consumeSelected(1);
     this.audio.playPlace(block);
+    // Building the last block of a 4x5 obsidian frame lights the portal right
+    // away, so finishing the frame is enough to travel to the Nether.
+    if (blockId === 25) {
+      for (const part of parts) this.ignitePortal({ x: part.x, y: part.y, z: part.z, id: 25 });
+    }
     this.onInventoryChanged();
   }
 
@@ -3330,6 +3338,11 @@ export class Game {
     this.hud.updateLocation(biome, this.player.position);
     this.updateMap();
     this.hud.setUnderwater(this.player.headInWater);
+    const boss = this.dimension === 'nether'
+      ? this.entities?.entities.find((entity) => entity.kind === 'boss' && !entity.dead)
+      : null;
+    if (boss) this.hud.setBoss(boss);
+    else this.hud.clearBoss();
     this.updateDebug();
   }
 

@@ -49,11 +49,13 @@ import {
   generateChunk,
   findSpawn,
   nearbyVillages,
+  BIOME,
   BIOME_INFO,
+  NETHER_ORIGIN,
   WorldGenerator,
 } from '../src/world/generator.js';
 import { buildPaddedVolume, meshChunk } from '../src/world/mesher.js';
-import { MOBS } from '../src/entities/mobs.js';
+import { HOSTILE_MOBS, MOBS, passivePool, spawnablePassive } from '../src/entities/mobs.js';
 import { Entity } from '../src/entities/Entity.js';
 import { EntityManager } from '../src/entities/EntityManager.js';
 import { FluidSimulation } from '../src/world/Fluids.js';
@@ -939,6 +941,58 @@ await test('monsters hunt animals and villagers, golems defend them', () => {
   const zombieHealth = zombieCow.health;
   golem.update(1 / 60, world, player, manager);
   assert.ok(zombieCow.health < zombieHealth, 'golem should protect the animals');
+});
+
+await test('nether portal leads to a hell with pigs and a boss', () => {
+  assert.equal(MOBS.nether_pig.kind, 'passive');
+  assert.ok(MOBS.nether_pig.dimensions.includes('nether'));
+  assert.ok(passivePool('nether').some((mob) => mob.key === 'nether_pig'));
+  assert.ok(!passivePool('overworld').some((mob) => mob.key === 'nether_pig'));
+  assert.ok(!spawnablePassive(BIOME.NETHER).some((mob) => mob.key === 'nether_pig'));
+  assert.equal(MOBS.hell_lord.kind, 'boss');
+  assert.ok(MOBS.hell_lord.health > 200);
+  assert.ok(!HOSTILE_MOBS.some((mob) => mob.key === 'hell_lord'), 'boss must not join random hostile spawns');
+
+  const world = { ...makeFlatWorld(39), getHeightAt: () => 39 };
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 3 });
+  const player = {
+    position: { x: NETHER_ORIGIN.x + 0.5, y: 41, z: NETHER_ORIGIN.z - 3.5 },
+    creative: false,
+    dead: false,
+    damage() {},
+  };
+  manager.update(0.1, player, { day: false });
+  const pigs = manager.entities.filter((entity) => entity.type === 'nether_pig');
+  const boss = manager.entities.find((entity) => entity.kind === 'boss');
+  assert.ok(pigs.length >= 3, 'the nether plaza should start with a pig herd');
+  assert.ok(boss, 'the nether plaza should spawn the boss');
+});
+
+await test('boss hunts the player, resists blunt weapons and respawns later', () => {
+  const world = makeFlatWorld(5);
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 4 });
+  const boss = manager.spawnMob('hell_lord', 0.5, 6.02, 0.5);
+  const pig = manager.spawnMob('nether_pig', 1.6, 6.02, 0.5);
+  const player = {
+    position: { x: 3.5, y: 6, z: 0.5 },
+    creative: false,
+    dead: false,
+    damage() {},
+  };
+  boss.update(1 / 60, world, player, manager);
+  assert.equal(boss.huntTarget, player, 'boss must focus on the player');
+  assert.equal(pig.health, pig.maxHealth, 'boss should ignore nearby pigs');
+
+  const beforeAxe = boss.health;
+  manager.attack(boss, 10, player, { type: 'axe', tier: 3 });
+  assert.equal(beforeAxe - boss.health, 5.5);
+  const beforeSword = boss.health;
+  manager.attack(boss, 10, player, { type: 'sword', tier: 3 });
+  assert.equal(beforeSword - boss.health, 16);
+
+  manager.attack(boss, 9999, player, { type: 'sword', tier: 3 });
+  assert.equal(boss.dead, true);
+  assert.ok(manager.bossRespawnAt > manager.time, 'defeated boss gets a respawn delay');
 });
 
 await test('crafting recipes match shaped and shapeless grids', () => {

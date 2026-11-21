@@ -37,6 +37,9 @@ export class HUD {
     this.playerListEl = $('player-list');
     this.playerListHeaderEl = $('player-list-header');
     this.playerListItemsEl = $('player-list-items');
+    this.bossBar = $('boss-bar');
+    this.bossNameEl = $('boss-name');
+    this.bossFillEl = $('boss-fill');
     this.mapCanvas = $('minimap-canvas');
     this.mapCtx = this.mapCanvas?.getContext?.('2d') ?? null;
 
@@ -52,6 +55,7 @@ export class HUD {
     this.lastDebug = '';
     this.lastBreak = -1;
     this.lastPlayerList = '';
+    this.lastBoss = '';
 
     this.buildStats();
     this.buildHotbar();
@@ -314,6 +318,31 @@ export class HUD {
     this.heldTimer = setTimeout(() => {
       this.heldItemEl.classList.add('hidden');
     }, 1800);
+  }
+
+  /** Full-width health bar for the Nether boss; hidden whenever no boss is near. */
+  setBoss(boss) {
+    if (!this.bossBar) return;
+    if (!boss) {
+      if (this.lastBoss !== '') {
+        this.bossBar.classList.add('hidden');
+        this.lastBoss = '';
+      }
+      return;
+    }
+    const name = boss.name ?? 'Босс';
+    const maxHealth = Math.max(1, boss.maxHealth ?? 1);
+    const ratio = Math.max(0, Math.min(1, (boss.health ?? 0) / maxHealth));
+    const signature = `${name}|${ratio.toFixed(3)}`;
+    if (signature === this.lastBoss) return;
+    this.lastBoss = signature;
+    this.bossNameEl.textContent = name;
+    this.bossFillEl.style.width = `${ratio * 100}%`;
+    this.bossBar.classList.remove('hidden');
+  }
+
+  clearBoss() {
+    this.setBoss(null);
   }
 
   toast(message, duration = 1900) {

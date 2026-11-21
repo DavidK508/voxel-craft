@@ -3,10 +3,11 @@ import { Entity } from './Entity.js';
 import {
   MOBS,
   hostilePool,
+  passivePool,
   rollDrops,
   spawnablePassive,
 } from './mobs.js';
-import { dimensionAt, nearbyVillages } from '../world/generator.js';
+import { dimensionAt, nearbyVillages, NETHER_ORIGIN } from '../world/generator.js';
 
 const MAX_ENTITIES = 28;
 const DESPAWN_DISTANCE = 90;
@@ -14,6 +15,7 @@ const SPAWN_MIN = 22;
 const SPAWN_MAX = 46;
 const FARM_ANIMALS = ['cow', 'pig', 'sheep', 'chicken'];
 const FARM_ANIMAL_COUNT = 4;
+const BOSS_RESPAWN_SECONDS = 120;
 
 export class EntityManager {
   constructor({ scene, world, drops, seed, audio = null }) {
@@ -29,7 +31,11 @@ export class EntityManager {
     this.villageCache = [];
     this.villageCacheTimer = 0;
     this.golemCooldowns = new Map();
+    this.bossRespawnAt = 0;
+    this.pigSeedAt = 0;
     this.onAttack = null;
+    this.onBossSpawn = null;
+    this.onBossDefeat = null;
   }
 
   add(entity) {
@@ -61,12 +67,17 @@ export class EntityManager {
         || (entity.hostile && distance > 72)
         || entityDimension !== dimension;
       if (entity.dead || tooFar) {
-        if (entity.dead && !entity.exploded) this.dropLoot(entity);
+        if (entity.dead) {
+          if (entity.kind === 'boss') this.registerBossDefeat(entity);
+          if (!entity.exploded) this.dropLoot(entity);
+        }
         this.removeAt(i);
         continue;
       }
       entity.update(dt, this.world, player, this);
     }
+
+    this.ensureNetherLife(player, dimension);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
@@ -115,6 +126,64 @@ export class EntityManager {
     return { x, y: height + 1.02, z };
   }
 
+  /**
+   * The Nether plaza always has a small herd and, after a defeat, a recovering
+   * boss. This runs every frame but the expensive work is gated by timers.
+   */
+  ensureNetherLife(player, dimension) {
+    if (dimension !== 'nether') return;
+    const distance = Math.hypot(
+      player.position.x - NETHER_ORIGIN.x,
+      player.position.z - NETHER_ORIGIN.z,
+    );
+    if (distance > 44) return;
+
+    const bossAlive = this.entities.some((entity) => entity.kind === 'boss' && !entity.dead);
+    if (!bossAlive && this.time >= this.bossRespawnAt) this.spawnNetherBoss();
+    if (this.time >= this.pigSeedAt) this.seedNetherPigs();
+  }
+
+  spawnNetherBoss() {
+    const x = NETHER_ORIGIN.x + 8.5;
+    const z = NETHER_ORIGIN.z - 8.5;
+    if (!this.world.isChunkLoadedAt(x, z)) return;
+    const height = this.world.getHeightAt(Math.floor(x), Math.floor(z));
+    if (height == null) return;
+    const ground = this.world.getBlock(Math.floor(x), height, Math.floor(z));
+    const above = this.world.getBlock(Math.floor(x), height + 1, Math.floor(z));
+    if (ground === 0 || ground === 11 || ground === 30 || ground === 55 || above !== 0) return;
+    const boss = this.spawnMob('hell_lord', x, height + 1.02, z, {
+      home: { x: NETHER_ORIGIN.x, z: NETHER_ORIGIN.z },
+    });
+    if (boss) this.onBossSpawn?.(boss);
+  }
+
+  seedNetherPigs() {
+    const pigs = this.entities.filter((entity) => entity.type === 'nether_pig' && !entity.dead).length;
+    if (pigs < 3) {
+      for (let i = pigs; i < 3; i++) {
+        const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
+        const radius = 4 + Math.random() * 3;
+        const x = NETHER_ORIGIN.x + Math.cos(angle) * radius;
+        const z = NETHER_ORIGIN.z + Math.sin(angle) * radius;
+        if (!this.world.isChunkLoadedAt(x, z)) continue;
+        const height = this.world.getHeightAt(Math.floor(x), Math.floor(z));
+        if (height == null) continue;
+        const ground = this.world.getBlock(Math.floor(x), height, Math.floor(z));
+        const above = this.world.getBlock(Math.floor(x), height + 1, Math.floor(z));
+        if (ground === 0 || ground === 11 || ground === 30 || ground === 55 || above !== 0) continue;
+        this.spawnMob('nether_pig', x, height + 1.02, z, { home: { x, z } });
+      }
+    }
+    this.pigSeedAt = this.time + 45;
+  }
+
+  registerBossDefeat(boss) {
+    if (this.bossRespawnAt > this.time) return;
+    this.bossRespawnAt = this.time + BOSS_RESPAWN_SECONDS;
+    this.onBossDefeat?.(boss);
+  }
+
   trySpawn(player, dimension, day) {
     const hostile = !day || dimension !== 'overworld';
     if (hostile && Math.random() < (dimension === 'overworld' ? 0.7 : 0.9)) {
@@ -127,6 +196,23 @@ export class EntityManager {
       return;
     }
 
+    if (dimension === 'nether') {
+      const pool = passivePool('nether');
+      if (pool.length === 0) return;
+      const mob = pool[Math.floor(Math.random() * pool.length)];
+      const point = this.randomSpawnPoint(player, dimension, 18, 34);
+      if (!point) return;
+      const [minGroup, maxGroup] = mob.group ?? [1, 1];
+      const group = minGroup + Math.floor(Math.random() * (maxGroup - minGroup + 1));
+      for (let i = 0; i < group; i++) {
+        const px = point.x + (Math.random() - 0.5) * 2.5;
+        const pz = point.z + (Math.random() - 0.5) * 2.5;
+        const height = this.world.getHeightAt(Math.floor(px), Math.floor(pz));
+        if (height == null) continue;
+        this.spawnMob(mob.key, px, height + 1.02, pz, { home: { x: px, z: pz } });
+      }
+      return;
+    }
     if (dimension !== 'overworld') return;
     const biome = this.world.getBiomeIdAt?.(
       Math.floor(player.position.x),
@@ -289,9 +375,15 @@ export class EntityManager {
         : damage * 0.35;
       if (player?.creative) applied = Math.max(applied, 10);
     }
+    // The boss' burning hide turns most blows aside; swords bite deep.
+    if (entity.kind === 'boss') {
+      applied = tool?.type === 'sword' ? damage * 1.6 : damage * 0.55;
+      if (player?.creative) applied = Math.max(applied, 12);
+    }
     const died = entity.hit(applied, player);
     if (wasVillager && player) this.provokeGolems(entity.position);
     if (died) {
+      if (entity.kind === 'boss') this.registerBossDefeat(entity);
       if (entity.kind === 'guardian' && entity.home) {
         const key = `${Math.round(entity.home.x)},${Math.round(entity.home.z)}`;
         this.golemCooldowns.set(key, this.time + 45);
@@ -351,6 +443,8 @@ export class EntityManager {
   clear() {
     for (const entity of this.entities) entity.dispose();
     this.entities.length = 0;
+    // A fresh visit should always find pigs waiting on the plaza.
+    this.pigSeedAt = 0;
   }
 
   dispose() {

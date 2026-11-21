@@ -137,6 +137,25 @@ export const MOBS = Object.freeze({
     damage: 3, attackRange: 1.7, dimensions: ['nether'], flying: true,
     drops: [{ id: 426, min: 1, max: 2 }],
   },
+  nether_pig: {
+    key: 'nether_pig', name: 'Адская свинья', kind: 'passive', model: 'nether_pig',
+    health: 12, speed: 1.3, width: 0.9, height: 1.05,
+    dimensions: ['nether'], group: [2, 4], spawnWeight: 1,
+    drops: [{ id: 430, min: 1, max: 2 }, { id: 426, min: 0, max: 1 }],
+  },
+  hell_lord: {
+    key: 'hell_lord', name: 'Адский повелитель', kind: 'boss', model: 'hell_lord',
+    health: 240, speed: 1.65, width: 2.2, height: 3.8,
+    damage: 9, attackRange: 2.8, dimensions: ['nether'],
+    // The lord hoards the Nether's riches; swords are the only reliable way
+    // to cut through its burning hide (see EntityManager.attack).
+    drops: [
+      { id: 426, min: 4, max: 8 },
+      { id: 404, min: 6, max: 12 },
+      { id: 405, min: 2, max: 4 },
+      { id: 440, min: 1, max: 3 },
+    ],
+  },
 });
 
 export const PASSIVE_MOBS = Object.values(MOBS).filter((m) => m.kind === 'passive' || m.kind === 'neutral');
@@ -145,6 +164,12 @@ export const HOSTILE_MOBS = Object.values(MOBS).filter((m) => m.kind === 'hostil
 /** Mobs that can spawn in a biome during the overworld day. */
 export function spawnablePassive(biome) {
   return PASSIVE_MOBS.filter((mob) => mob.biomes?.includes(biome) && !mob.dimensions);
+}
+
+/** Peaceful mobs that belong to a non-overworld dimension (e.g. Nether pigs). */
+export function passivePool(dimension) {
+  if (dimension === 'overworld') return [];
+  return PASSIVE_MOBS.filter((mob) => mob.dimensions?.includes(dimension));
 }
 
 /** Hostile pool per dimension. */

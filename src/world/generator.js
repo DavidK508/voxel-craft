@@ -964,6 +964,16 @@ export class WorldGenerator {
     for (let x = px; x <= px + 1; x++) {
       for (let y = py; y <= py + 2; y++) setWorld(x, y, oz, 55);
     }
+    // Boss dais in the south-east corner: a chequered brick floor with four
+    // glowstone inlays that marks where the Nether lord wakes up.
+    for (let dx = 5; dx <= 9; dx++) {
+      for (let dz = -9; dz <= -5; dz++) {
+        setWorld(ox + dx, 39, oz + dz, (dx + dz) % 2 === 0 ? 52 : 50);
+      }
+    }
+    for (const [dx, dz] of [[5, -5], [9, -5], [5, -9], [9, -9]]) {
+      setWorld(ox + dx, 39, oz + dz, 29);
+    }
     // Glowstone lanterns around the platform.
     for (const [dx, dz] of [[-6, -6], [6, -6], [-6, 6], [6, 6]]) {
       setWorld(ox + dx, 40, oz + dz, 25);

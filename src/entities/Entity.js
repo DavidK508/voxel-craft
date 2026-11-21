@@ -26,7 +26,8 @@ export class Entity {
     this.mob = mob;
     this.name = mob.name;
     this.kind = mob.kind;
-    this.hostile = mob.kind === 'hostile';
+    this.isBoss = mob.kind === 'boss';
+    this.hostile = mob.kind === 'hostile' || this.isBoss;
     this.width = mob.width;
     this.height = mob.height;
     this.flying = !!mob.flying;
@@ -425,6 +426,8 @@ export class Entity {
 
   /** Nearest player or peaceful creature for a hostile mob to hunt. */
   findPrey(player, canHunt, manager) {
+    // The boss ignores the local wildlife and only hunts the player.
+    if (this.isBoss) return canHunt ? player : null;
     let best = null;
     let bestDistance = Infinity;
     const consider = (entity) => {
@@ -508,6 +511,9 @@ export class Entity {
     this.model.legs?.forEach((leg, index) => {
       const phase = index % 2 === 0 ? swing : -swing;
       leg.rotation.x = phase;
+    });
+    this.model.arms?.forEach((arm, index) => {
+      arm.rotation.x = index % 2 === 0 ? -swing * 0.6 : swing * 0.6;
     });
     if (this.model.wings) {
       const flap = Math.sin(this.time * 16 + this.walkPhase) * 0.55;
