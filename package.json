@@ -1,6 +1,6 @@
 {
   "name": "voxelcraft",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "VoxelCraft — a full-featured Minecraft-like voxel sandbox built with Electron and Three.js",
   "main": "main.js",
   "author": {
