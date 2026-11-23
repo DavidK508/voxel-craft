@@ -416,6 +416,25 @@ await test('overworld carves long water-filled rivers', () => {
   assert.equal(chunk.blocks[localIndex(lx, SEA_LEVEL, lz)], 11, 'river surface should be water');
 });
 
+await test('overworld stays mostly land instead of scattered islands', () => {
+  for (const seed of [0x1234abcd, 7, 99, 2024]) {
+    const generator = new WorldGenerator(seed);
+    let water = 0;
+    let shallow = 0;
+    let total = 0;
+    for (let z = -192; z < 192; z += 6) {
+      for (let x = -192; x < 192; x += 6) {
+        const height = generator.heightAt(x, z);
+        total++;
+        if (height < SEA_LEVEL - 2) water++;
+        else if (height <= SEA_LEVEL) shallow++;
+      }
+    }
+    assert.ok(water / total < 0.35, `seed ${seed}: too much ocean (${water}/${total})`);
+    assert.ok(shallow / total < 0.08, `seed ${seed}: too many shallow wetlands (${shallow}/${total})`);
+  }
+});
+
 await test('redstone ore is generated underground and drops raw redstone', () => {
   let ore = 0;
   for (let cz = -1; cz <= 1; cz++) {

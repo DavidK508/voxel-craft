@@ -122,26 +122,22 @@ export class WorldGenerator {
   riverStrengthAt(x, z) {
     // Low-frequency domain warp makes winding valleys instead of straight
     // noise contours; several basins keep different regions from repeating.
-    const warpX = this.noise.terrain.fbm2(x * 0.00042 - 13.7, z * 0.00042 + 8.2, 3, 2, 0.5) * 260;
-    const warpZ = this.noise.hills.fbm2(x * 0.00042 + 31.9, z * 0.00042 - 17.4, 3, 2, 0.5) * 260;
+    const warpX = this.noise.terrain.fbm2(x * 0.00042 - 13.7, z * 0.00042 + 8.2, 3, 2, 0.5) * 180;
+    const warpZ = this.noise.hills.fbm2(x * 0.00042 + 31.9, z * 0.00042 - 17.4, 3, 2, 0.5) * 180;
     const wx = x + warpX;
     const wz = z + warpZ;
     const n = this.noise.river.fbm2(wx * 0.00135 + 73.4, wz * 0.00135 - 19.6, 4, 2.05, 0.5);
-    const wiggle = this.noise.erosion.noise2(wx * 0.005 + 11.1, wz * 0.005 - 7.4) * 0.016;
-    const width = 0.038 + Math.max(0, this.noise.erosion.noise2(wx * 0.0006, wz * 0.0006)) * 0.022;
-    const strength = 1 - smoothstep(0, width, Math.abs(n + wiggle));
-    // Narrow tributaries branch off dominant river valleys.
-    const tributary = this.noise.river.noise2(wx * 0.0038 - 61.3, wz * 0.0038 + 44.7);
-    const branch = strength > 0.08 ? (1 - smoothstep(0.02, 0.07, Math.abs(tributary))) * 0.55 : 0;
-    return Math.max(strength, branch);
+    const wiggle = this.noise.erosion.noise2(wx * 0.005 + 11.1, wz * 0.005 - 7.4) * 0.014;
+    const width = 0.030 + Math.max(0, this.noise.erosion.noise2(wx * 0.0006, wz * 0.0006)) * 0.012;
+    return 1 - smoothstep(0, width, Math.abs(n + wiggle));
   }
 
   /** Shallow lake basins in flat lowlands; kept away from ocean coastlines. */
   lakeStrengthAt(x, z, continent = this.noise.terrain.fbm2(x * 0.00105, z * 0.00105, 5, 2, 0.5)) {
-    if (continent < -0.16 || continent > 0.52) return 0;
+    if (continent < -0.04 || continent > 0.42) return 0;
     const n = this.noise.hills.noise2(x * 0.0058 + 91.4, z * 0.0058 - 26.7);
-    const detail = this.noise.erosion.fbm2(x * 0.013 - 8.6, z * 0.013 + 19.2, 2, 2, 0.5) * 0.16;
-    return 1 - smoothstep(0.24, 0.46, n + detail);
+    const detail = this.noise.erosion.fbm2(x * 0.013 - 8.6, z * 0.013 + 19.2, 2, 2, 0.5) * 0.08;
+    return 1 - smoothstep(-0.72, -0.55, n + detail);
   }
 
   heightAt(x, z) {
@@ -156,27 +152,33 @@ export class WorldGenerator {
     const erosion = clamp(this.noise.erosion.fbm2(x * 0.0018 - 40.3, z * 0.0018 + 12.7, 4, 2, 0.5) * 0.5 + 0.5, 0, 1);
     const mountainMask = smoothstep(0.46, 0.82, ridge * 0.68 + continent * 0.32) * (0.45 + erosion * 0.55);
 
-    let h = SEA_LEVEL + 4 + continent * 22 + hills * 7 + detail * 1.8;
+    let h = SEA_LEVEL + 6 + continent * 20 + hills * 7 + detail * 1.8;
     h += Math.pow(Math.max(0, ridge - 0.38), 2.15) * 84 * mountainMask;
-    if (continent < -0.24) h -= (-continent - 0.24) * 58;
+    if (continent < -0.34) h -= (-continent - 0.34) * 75;
 
     // Soft plateaus and rolling lowlands make traversal more readable.
     const plateau = this.noise.terrain.noise2(x * 0.00042 + 12.5, z * 0.00042 - 7.1);
     h += smoothstep(0.32, 0.78, plateau) * 8;
 
+    // Keep ordinary lowlands dry. Only rivers, lakes and oceans may cut below
+    // sea level, so the world does not dissolve into shallow wetlands.
+    if (continent >= -0.34 && h < SEA_LEVEL + 2) {
+      h = SEA_LEVEL + 2 + (h - SEA_LEVEL - 2) * 0.12;
+    }
+
     // Rivers carve winding channels down to sea level on land.
-    if (continent > -0.18 && h > SEA_LEVEL - 1) {
+    if (continent > -0.28 && h > SEA_LEVEL - 1) {
       const river = this.riverStrengthAt(x, z);
       if (river > 0) {
-        const depth = 2.5 + river * 5.5 + Math.max(0, continent) * 1.5;
-        h = lerp(h, SEA_LEVEL - depth, smoothstep(0.02, 0.85, river));
+        const depth = 3.5 + river * 5 + Math.max(0, continent) * 1.5;
+        h = lerp(h, SEA_LEVEL - depth, smoothstep(0.12, 0.75, river));
       }
     }
 
     // Shallow lakes dot gentle lowlands, with banks that make shore habitat.
     const lake = this.lakeStrengthAt(x, z, continent);
-    if (lake > 0 && h > SEA_LEVEL - 1 && h < SEA_LEVEL + 13) {
-      h = lerp(h, SEA_LEVEL - 1.8 - lake * 1.4, smoothstep(0.25, 0.9, lake) * 0.9);
+    if (lake > 0 && h > SEA_LEVEL - 1 && h < SEA_LEVEL + 10) {
+      h = lerp(h, SEA_LEVEL - 0.6 - lake * 0.7, smoothstep(0.35, 0.9, lake) * 0.75);
     }
 
     // Raise a soft rim just outside waterways so the shore is visible.
@@ -187,7 +189,7 @@ export class WorldGenerator {
       this.riverStrengthAt(x, z - 7),
     );
     if (h >= SEA_LEVEL && neighbor > 0.15 && this.riverStrengthAt(x, z) <= 0.02) {
-      h += smoothstep(0.15, 0.7, neighbor) * 1.8;
+      h += smoothstep(0.15, 0.7, neighbor) * 2.2;
     }
 
     const height = clamp(Math.floor(h), 6, WORLD_HEIGHT - 18);
