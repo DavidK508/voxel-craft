@@ -8,6 +8,7 @@ import {
   preferredFuel,
 } from '../shared/cooking.js';
 import { CharacterPreview } from './CharacterPreview.js';
+import { CHEST_SLOTS } from '../shared/storage.js';
 import {
   ITEM_LIST,
   createItemStack,
@@ -67,6 +68,8 @@ export class InventoryUI {
 
     this.craftingAreaEl = $('crafting-area');
     this.craftingBookEl = $('crafting-book');
+    this.chestAreaEl = $('chest-area');
+    this.chestGridEl = $('chest-grid');
     this.cookingAreaEl = $('cooking-area');
     this.cookingBookEl = $('cooking-book');
     this.cookingInputEl = $('cooking-input-slot');
@@ -80,6 +83,9 @@ export class InventoryUI {
     this.cooking = new CookingSession();
     this.cookingMode = false;
     this.cookingCards = new Map();
+
+    this.chestSlots = new Array(CHEST_SLOTS).fill(null);
+    this.chestMode = false;
 
     this.views = new Map();
     this.recipeCards = new Map();
@@ -130,6 +136,11 @@ export class InventoryUI {
       element.dataset.index = String(index);
       this.views.set(`cook:${index}`, this.decorateSlot(element));
     });
+    for (let i = 0; i < CHEST_SLOTS; i++) {
+      const element = this.createSlotElement('chest', i);
+      this.chestGridEl?.appendChild(element);
+      this.views.set(`chest:${i}`, this.decorateSlot(element));
+    }
     this.resultEl.dataset.kind = 'result';
     this.resultEl.dataset.index = '0';
     this.resultView = this.decorateSlot(this.resultEl);
@@ -593,20 +604,29 @@ export class InventoryUI {
   open(size = 2, options = {}) {
     if (this.openState) this.close();
     this.cookingMode = options.cooking === true;
-    this.creative = options.creative === true && !this.cookingMode;
+    this.chestMode = options.chest === true;
+    this.creative = options.creative === true && !this.cookingMode && !this.chestMode;
     this.craftingSize = size === 3 ? 3 : 2;
     this.craftingSlots = new Array(9).fill(null);
+    this.chestSlots = Array.isArray(options.slots)
+      ? options.slots
+      : new Array(CHEST_SLOTS).fill(null);
     this.cursorStack = null;
     this.lastHoverKey = null;
     this.screen.classList.toggle('creative-mode', this.creative);
     this.screen.classList.toggle('cooking-mode', this.cookingMode);
+    this.screen.classList.toggle('chest-mode', this.chestMode);
     toggleHidden(this.creativePanel, !this.creative);
-    toggleHidden(this.craftingAreaEl, this.cookingMode || this.creative);
-    toggleHidden(this.craftingBookEl, this.cookingMode || this.creative);
+    toggleHidden(this.craftingAreaEl, this.cookingMode || this.chestMode || this.creative);
+    toggleHidden(this.craftingBookEl, this.cookingMode || this.chestMode || this.creative);
     toggleHidden(this.cookingAreaEl, !this.cookingMode);
     toggleHidden(this.cookingBookEl, !this.cookingMode);
+    toggleHidden(this.chestAreaEl, !this.chestMode);
 
-    if (this.cookingMode) {
+    if (this.chestMode) {
+      this.titleEl.textContent = 'Сундук';
+      this.subtitleEl.textContent = 'Перетаскивайте предметы между сундуком и инвентарём.';
+    } else if (this.cookingMode) {
       this.titleEl.textContent = options.pan ? 'Сковорода' : 'Печь';
       this.subtitleEl.textContent = 'Положи продукт и топливо. Готовка идёт, пока это окно открыто.';
       this.resetCooking();
@@ -648,8 +668,11 @@ export class InventoryUI {
     this.openState = false;
     this.creative = false;
     this.cookingMode = false;
+    this.chestMode = false;
+    this.chestSlots = new Array(CHEST_SLOTS).fill(null);
     this.recipe = null;
     this.screen.classList.remove('cooking-mode');
+    this.screen.classList.remove('chest-mode');
     this.preview?.stop();
     this.screen.classList.add('hidden');
     this.cursorEl.classList.add('hidden');
@@ -680,6 +703,7 @@ export class InventoryUI {
   getStack(kind, index) {
     if (kind === 'craft') return this.craftingSlots[index] ?? null;
     if (kind === 'cook') return this.cooking.getSlot(index);
+    if (kind === 'chest') return this.chestSlots[index] ?? null;
     if (kind === 'armor') return this.inventory.armor[index] ?? null;
     return this.inventory.slots[index] ?? null;
   }
@@ -689,6 +713,8 @@ export class InventoryUI {
       this.craftingSlots[index] = stack;
     } else if (kind === 'cook') {
       this.cooking.setSlot(index, stack);
+    } else if (kind === 'chest') {
+      this.chestSlots[index] = stack;
     } else if (kind === 'armor') {
       this.inventory.setArmorSlot(index, stack);
     } else {
@@ -749,6 +775,13 @@ export class InventoryUI {
     for (let i = 0; i < this.inventory.armor.length; i++) {
       const view = this.views.get(`armor:${i}`);
       if (view) this.renderSlot(view, this.inventory.armor[i]);
+    }
+
+    if (this.chestMode) {
+      for (let i = 0; i < CHEST_SLOTS; i++) {
+        const view = this.views.get(`chest:${i}`);
+        if (view) this.renderSlot(view, this.chestSlots[i]);
+      }
     }
 
     this.renderSlot(this.resultView, this.getResultStack());
@@ -977,20 +1010,50 @@ export class InventoryUI {
     this.refresh();
   }
 
+  /** Merges a stack into matching chest slots, then into empty ones. */
+  addToChest(stack) {
+    if (!stack) return null;
+    const max = getMaxStack(stack.id);
+    let remaining = stack.count;
+    if (max > 1) {
+      for (let i = 0; i < this.chestSlots.length && remaining > 0; i++) {
+        const slot = this.chestSlots[i];
+        if (slot && slot.id === stack.id && slot.count < max) {
+          const move = Math.min(max - slot.count, remaining);
+          slot.count += move;
+          remaining -= move;
+        }
+      }
+    }
+    for (let i = 0; i < this.chestSlots.length && remaining > 0; i++) {
+      if (!this.chestSlots[i]) {
+        const move = Math.min(max, remaining);
+        this.chestSlots[i] = { ...stack, count: move };
+        remaining -= move;
+      }
+    }
+    return remaining > 0 ? { ...stack, count: remaining } : null;
+  }
+
   quickMove(kind, index) {
     const stack = this.getStack(kind, index);
     if (!stack) return;
 
     if (this.tryEquipArmor(kind, index)) return;
 
-    if (kind === 'craft') {
+    if (kind === 'craft' || kind === 'cook') {
       const remainder = this.inventory.addStack(stack);
-      this.craftingSlots[index] = remainder;
+      this.setStack(kind, index, remainder);
       return;
     }
-    if (kind === 'cook') {
+    if (kind === 'chest') {
       const remainder = this.inventory.addStack(stack);
-      this.cooking.setSlot(index, remainder);
+      this.chestSlots[index] = remainder;
+      return;
+    }
+    if (this.chestMode) {
+      const remainder = this.addToChest(stack);
+      this.inventory.setSlot(index, remainder);
       return;
     }
 

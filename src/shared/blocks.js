@@ -1,4 +1,5 @@
 import { TILE } from './textures.js';
+import { CHEST_BLOCK } from './storage.js';
 
 export const AIR = 0;
 
@@ -502,6 +503,17 @@ const defs = [
   cropStageDef(197, 'millet_crop_growing', 'Пшено (рост)', TILE.millet_crop, 1, 525),
   cropStageDef(198, 'millet_crop_ripe', 'Пшено (почти спелое)', TILE.millet_crop, 2, 525),
   cropStageDef(199, 'millet_crop', 'Пшено', TILE.millet_crop, 3, 525, 526, true),
+
+  // Storage: right-click opens 27 slots of persistent per-position storage.
+  {
+    id: CHEST_BLOCK, key: 'chest', name: 'Сундук', hardness: 2.5, tool: 'axe',
+    faceTiles: [
+      TILE.chest_side, TILE.chest_side, TILE.chest_top,
+      TILE.chest_side, TILE.chest_front, TILE.chest_side,
+    ],
+    drops: [{ id: CHEST_BLOCK, count: 1 }], interactive: 'chest',
+    mergeSides: false,
+  },
 ];
 
 // Multi-block and powered states are encoded directly in the block id, so the

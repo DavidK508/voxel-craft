@@ -1026,6 +1026,64 @@ const PAINTERS = {
       if (rng() > 0.5) pixel(ctx, x - 2, 7, 244, 208, 86);
     }
   },
+  chest_top: (ctx, rng) => {
+    planksTexture(ctx, rng, [146, 98, 54]);
+    // Dark frame and a bright rim around the lid.
+    for (let i = 0; i < SIZE; i++) {
+      pixel(ctx, i, 0, 74, 46, 26);
+      pixel(ctx, i, 15, 74, 46, 26);
+      pixel(ctx, 0, i, 74, 46, 26);
+      pixel(ctx, 15, i, 74, 46, 26);
+      pixel(ctx, i, 2, 182, 132, 74);
+      pixel(ctx, i, 13, 182, 132, 74);
+      pixel(ctx, 2, i, 182, 132, 74);
+      pixel(ctx, 13, i, 182, 132, 74);
+    }
+    for (let y = 4; y < 12; y++) {
+      for (let x = 4; x < 12; x++) pixel(ctx, x, y, 132, 88, 46);
+    }
+  },
+  chest_side: (ctx, rng) => {
+    planksTexture(ctx, rng, [146, 98, 54]);
+    for (let y = 0; y < SIZE; y++) {
+      pixel(ctx, 1, y, 58, 56, 54);
+      pixel(ctx, 2, y, 92, 88, 82);
+      pixel(ctx, 13, y, 92, 88, 82);
+      pixel(ctx, 14, y, 58, 56, 54);
+    }
+    for (let x = 0; x < SIZE; x++) {
+      pixel(ctx, x, 3, 58, 56, 54);
+      pixel(ctx, x, 4, 92, 88, 82);
+      pixel(ctx, x, 12, 92, 88, 82);
+      pixel(ctx, x, 13, 58, 56, 54);
+    }
+    for (let y = 6; y < 11; y++) {
+      pixel(ctx, 7, y, 226, 184, 62);
+    }
+  },
+  chest_front: (ctx, rng) => {
+    planksTexture(ctx, rng, [146, 98, 54]);
+    for (let y = 0; y < SIZE; y++) {
+      pixel(ctx, 1, y, 58, 56, 54);
+      pixel(ctx, 2, y, 92, 88, 82);
+      pixel(ctx, 13, y, 92, 88, 82);
+      pixel(ctx, 14, y, 58, 56, 54);
+    }
+    for (let x = 0; x < SIZE; x++) {
+      pixel(ctx, x, 3, 58, 56, 54);
+      pixel(ctx, x, 4, 92, 88, 82);
+      pixel(ctx, x, 12, 92, 88, 82);
+      pixel(ctx, x, 13, 58, 56, 54);
+    }
+    // Central iron latch with a golden keyhole.
+    for (let y = 5; y < 12; y++) {
+      for (let x = 6; x < 10; x++) pixel(ctx, x, y, y === 5 || y === 11 ? 54 : 76, 72, 70);
+    }
+    pixel(ctx, 7, 7, 236, 196, 72);
+    pixel(ctx, 8, 7, 236, 196, 72);
+    pixel(ctx, 8, 8, 236, 196, 72);
+    pixel(ctx, 8, 9, 236, 196, 72);
+  },
 };
 
 function makeCanvas(size = SIZE) {

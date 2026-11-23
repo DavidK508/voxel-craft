@@ -56,6 +56,7 @@ export const RECIPES = Object.freeze([
   { id: 'planks', shapeless: [{ any: LOGS }], result: { id: 5, count: 4 } },
   { id: 'sticks', pattern: ['P', 'P'], key: { P: 5 }, result: { id: 400, count: 4 } },
   { id: 'crafting_table', pattern: ['PP', 'PP'], key: { P: 5 }, result: { id: 21, count: 1 } },
+  { id: 'chest', pattern: ['PPP', 'P P', 'PPP'], key: { P: 5 }, result: { id: 200, count: 1 } },
   { id: 'furnace', pattern: ['CCC', 'C C', 'CCC'], key: { C: 4 }, result: { id: 22, count: 1 } },
   { id: 'stone_bricks', pattern: ['CC', 'CC'], key: { C: 4 }, result: { id: 28, count: 4 } },
   { id: 'sandstone', pattern: ['SS', 'SS'], key: { S: 8 }, result: { id: 9, count: 1 } },

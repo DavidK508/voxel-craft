@@ -51,6 +51,8 @@ import {
   isHoe,
   isTillable,
 } from '../src/shared/farming.js';
+import { CHEST_BLOCK, CHEST_SLOTS } from '../src/shared/storage.js';
+import { ContainerStorage } from '../src/game/ContainerStorage.js';
 import { isInWater, waterSurfaceAt } from '../src/shared/water.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
 import { findRecipe } from '../src/shared/recipes.js';
@@ -251,7 +253,7 @@ function makeSetWorld(solids) {
 const noInput = { isDown: () => false, isMouseDown: () => false };
 
 await test('block registry is complete and immutable', () => {
-  assert.equal(BLOCK_DEFS.length, 199);
+  assert.equal(BLOCK_DEFS.length, 200);
   assert.equal(getBlock(0).key, 'air');
   assert.equal(getBlock(1).key, 'stone');
   assert.equal(getBlock(999).key, 'air');
@@ -275,6 +277,9 @@ await test('block registry is complete and immutable', () => {
   assert.equal(getBlock(199).key, 'millet_crop');
   assert.equal(getBlock(199).solid, false);
   assert.deepEqual(getBlock(199).drops, [{ id: 526, count: 1 }, { id: 525, count: 1 }]);
+  assert.equal(getBlock(200).key, 'chest');
+  assert.equal(getBlock(200).interactive, 'chest');
+  assert.deepEqual(getBlock(200).drops, [{ id: 200, count: 1 }]);
   assert.equal(getBlock(69).key, 'bed_foot_0');
   assert.equal(getBlock(69).interactive, 'bed');
   assert.equal(getBlock(69).customShape, true);
@@ -423,6 +428,44 @@ await test('farming registry maps seeds, soil, stages and watering', () => {
   const dryWorld = { getBlock: () => 3 };
   assert.ok(hasWaterNearby(wetWorld, 0, 10, 0));
   assert.ok(!hasWaterNearby(dryWorld, 0, 10, 0));
+});
+
+await test('chests are craftable storage blocks with textures', () => {
+  assert.equal(CHEST_SLOTS, 27);
+  assert.equal(getItem(CHEST_BLOCK).placeBlock, CHEST_BLOCK);
+  const recipe = findRecipe([5, 5, 5, 5, null, 5, 5, 5, 5], 3);
+  assert.equal(recipe?.result.id, CHEST_BLOCK);
+  for (const name of ['chest_top', 'chest_side', 'chest_front']) {
+    assert.ok(TILE[name] >= 0 && TILE[name] < TEXTURE_COUNT, `missing texture ${name}`);
+  }
+});
+
+await test('chest storage survives save/load and drops contents when broken', () => {
+  const storage = new ContainerStorage();
+  const slots = storage.slotsAt(3, 64, -7);
+  assert.equal(slots.length, CHEST_SLOTS);
+  slots[0] = { id: 5, count: 64 };
+  slots[4] = { id: ITEM_IDS.IRON_HOE, count: 1, durability: 120 };
+
+  const saved = storage.serialize();
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved[0].items.map((item) => item.slot), [0, 4]);
+
+  const restored = new ContainerStorage();
+  restored.deserialize(saved);
+  assert.deepEqual(restored.slotsAt(3, 64, -7)[0], { id: 5, count: 64 });
+  assert.deepEqual(restored.slotsAt(3, 64, -7)[4], {
+    id: ITEM_IDS.IRON_HOE, count: 1, durability: 120,
+  });
+
+  // Invalid stacks in a hand-edited save must not leak into the game.
+  const invalid = new ContainerStorage();
+  invalid.deserialize([{ x: 1, y: 2, z: 3, items: [{ slot: 0, stack: { id: 99999, count: 5 } }] }]);
+  assert.equal(invalid.slotsAt(1, 2, 3)[0], null);
+
+  const contents = restored.remove(3, 64, -7);
+  assert.equal(contents[0].id, 5);
+  assert.equal(restored.has(3, 64, -7), false);
 });
 
 await test('hostile mobs carry visible weapons', async () => {
@@ -659,6 +702,7 @@ await test('fresh games spawn inside a village with crops and a livestock farm',
   assert.ok((counts.get(FARMLAND_BLOCK) ?? 0) > 20, 'village garden should be tilled');
   assert.ok((counts.get(68) ?? 0) > 30, 'village farm should be fenced');
   assert.ok((counts.get(60) ?? 0) > 0, 'village farm should store hay');
+  assert.ok((counts.get(CHEST_BLOCK) ?? 0) >= 7, 'village houses and barn should have chests');
 });
 
 await test('villages place seven distinct houses with doors, windows and paths', () => {
@@ -855,7 +899,7 @@ await test('emissive blocks bake block light into the mesh', () => {
 });
 
 await test('decorative blocks use rectangular, non-cube geometry', () => {
-  assert.equal(TEXTURE_COUNT, 109);
+  assert.equal(TEXTURE_COUNT, 112);
   for (const name of ['bed_top', 'bed_side', 'torch_stick', 'torch_flame', 'oak_fence',
     'door_bottom', 'door_top', 'lever_off', 'button_off', 'plate_off', 'wire_off',
     'repeater_off', 'piston_side', 'lamp_off', 'redstone_block', 'redstone_ore']) {

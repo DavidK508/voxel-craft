@@ -97,6 +97,7 @@ const ID = {
   milletCrop: 199,
   craftingTable: 21,
   furnace: 22,
+  chest: 200,
   glass: 12,
   pumpkin: 40,
   lava: 30,
@@ -919,6 +920,7 @@ export class WorldGenerator {
 
     // Butcher's work area and storage.
     set(x0 + 1, base + 1, z0 + 1, ID.craftingTable);
+    set(x0 + width - 2, base + 1, z0 + 2, ID.chest);
     set(x0 + width - 2, base + 1, z0 + 1, ID.furnace);
     set(x0 + width - 2, base + 1, z0 + depth - 2, ID.hay);
     set(x0 + 1, base + 1, z0 + depth - 2, ID.hay);
@@ -983,6 +985,7 @@ export class WorldGenerator {
     }
     // Interior furnishing varies with the style.
     set(x0 + 1, base + 1, z0 + 1, styleIndex === 0 || styleIndex === 3 ? 21 : 22);
+    set(x0 + 1, base + 1, z0 + depth - 2, ID.chest);
     if (styleIndex !== 1 && styleIndex !== 4) set(x0 + width - 2, base + 1, z0 + depth - 2, 48);
     if (styleIndex === 4 || styleIndex === 5) {
       set(x0 + 2, base + 1, z0 + 1, 42);

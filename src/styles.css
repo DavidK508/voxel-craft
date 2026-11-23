@@ -1676,6 +1676,41 @@ input {
   text-overflow: ellipsis;
 }
 
+/* ---------- Chest storage ---------- */
+
+.chest-area {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(214, 165, 82, 0.28);
+  border-radius: 3px;
+  background:
+    linear-gradient(180deg, rgba(124, 84, 36, 0.18), transparent),
+    rgba(0, 0, 0, 0.2);
+}
+
+.chest-title {
+  color: #d8c49b;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.chest-grid {
+  display: grid;
+  grid-template-columns: repeat(9, var(--slot-size));
+  gap: 2px;
+  justify-content: center;
+}
+
+.inventory-screen.chest-mode .character-preview,
+.inventory-screen.chest-mode .armor-row {
+  opacity: 0.55;
+}
+
 /* ---------- Stove / frying pan ---------- */
 
 .cooking-area {

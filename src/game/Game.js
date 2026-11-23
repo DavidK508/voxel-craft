@@ -20,6 +20,8 @@ import {
   getWallTorchId,
 } from '../shared/blocks.js';
 import { loadAppearance, saveAppearance } from '../shared/appearance.js';
+import { CHEST_BLOCK } from '../shared/storage.js';
+import { ContainerStorage } from './ContainerStorage.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
 import {
   FARMLAND_BLOCK,
@@ -219,6 +221,7 @@ export class Game {
       onTrade: (offer) => this.executeTrade(offer),
       onClose: () => this.closeTrade(),
     });
+    this.containers = new ContainerStorage();
     this.characterCreator = new CharacterCreator({
       onStart: () => this.confirmCharacter(),
       onBack: () => this.cancelCharacter(),
@@ -884,6 +887,7 @@ export class Game {
       edits: this.world.serializeEdits(),
       fluids: this.fluids ? this.fluids.serialize() : [],
       redstone: this.redstone ? this.redstone.serialize() : null,
+      chests: this.containers.serialize(),
       renderDistance: this.world.renderDistance,
       settings: { ...this.settings, renderDistance: this.world.renderDistance },
       savedAt: Date.now(),
@@ -1262,6 +1266,7 @@ export class Game {
       edits: Array.isArray(state.edits) ? state.edits : [],
       fluids: Array.isArray(state.fluids) ? state.fluids : [],
       drops: Array.isArray(state.drops) ? state.drops : [],
+      chests: Array.isArray(state.chests) ? state.chests : [],
       entities: [],
       renderDistance: state.renderDistance ?? this.settings.renderDistance,
       settings: { ...this.settings, ...(state.settings ?? {}) },
@@ -1336,6 +1341,7 @@ export class Game {
       edits: this.world.serializeEdits(),
       fluids: this.fluids ? this.fluids.serialize() : [],
       drops: this.drops ? this.drops.serialize() : [],
+      chests: this.containers.serialize(),
       renderDistance: this.world.renderDistance,
       settings: { ...this.settings, renderDistance: this.world.renderDistance },
       player: this.player.serialize(),
@@ -1966,6 +1972,8 @@ export class Game {
         // a convenient hotbar, while its catalog still provides infinite items.
         this.inventory = this.isCreative() ? Inventory.createCreative() : new Inventory();
       }
+      this.containers.clear();
+      if (loadedSave?.chests) this.containers.deserialize(loadedSave.chests);
       this.player.setCreative(this.isCreative());
       this.player.armorPoints = this.inventory.armorPoints();
       this.updatePlayerModelArmor();
@@ -2823,6 +2831,14 @@ export class Game {
     this.fluids?.wake(mining.x, mining.y, mining.z);
     this.sendNetworkEdit(mining.x, mining.y, mining.z, 0);
     this.audio.playBreak(block);
+    if (block.id === CHEST_BLOCK) {
+      const contents = this.containers.remove(mining.x, mining.y, mining.z);
+      if (contents) {
+        for (const stack of contents) {
+          this.drops?.spawnStack(stack, mining.x + 0.5, mining.y + 0.5, mining.z + 0.5);
+        }
+      }
+    }
     if (!this.isCreative()) {
       this.drops.spawnBlockDrops(block, mining.x, mining.y, mining.z, this.player, heldId);
       if (this.inventory.damageSelected(1)) {
@@ -2856,6 +2872,13 @@ export class Game {
       }
       if (targetBlock.interactive === 'furnace') {
         this.openInventory(2, { cooking: true });
+        return;
+      }
+      if (targetBlock.interactive === 'chest') {
+        this.openInventory(2, {
+          chest: true,
+          slots: this.containers.slotsAt(target.x, target.y, target.z),
+        });
         return;
       }
       if (targetBlock.interactive === 'bed') {

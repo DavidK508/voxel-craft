@@ -111,6 +111,10 @@ export const TEXTURE_NAMES = [
   // Farming update: tilled soil and the golden millet crop.
   'farmland',
   'millet_crop',
+  // Storage update: wooden chest with an iron latch.
+  'chest_top',
+  'chest_side',
+  'chest_front',
 ];
 
 export const TILE = Object.freeze(
