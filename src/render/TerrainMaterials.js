@@ -16,6 +16,9 @@ const terrainVertex = /* glsl */`
   varying vec3 vNormal;
   varying float vFogDepth;
 
+  uniform float uTime;
+  uniform float uWave;
+
   void main() {
     vUv = uv;
     vTile = aTile;
@@ -24,7 +27,13 @@ const terrainVertex = /* glsl */`
     vLight = aLight;
     vHorizon = aHorizon;
     vNormal = normalize(mat3(modelMatrix) * normal);
-    vec4 mvPosition = viewMatrix * modelMatrix * vec4(position, 1.0);
+    // World coordinates keep neighbouring chunks in phase, so a wave never
+    // opens a seam at a chunk border. Only water (uWave = 1) is displaced.
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vec3 displaced = position;
+    displaced.y += 0.025 * uWave
+      * sin(uTime * 2.2 + worldPosition.x * 0.7 + worldPosition.z * 0.5);
+    vec4 mvPosition = viewMatrix * modelMatrix * vec4(displaced, 1.0);
     vFogDepth = -mvPosition.z;
     gl_Position = projectionMatrix * mvPosition;
   }
@@ -59,8 +68,15 @@ const terrainFragment = /* glsl */`
   out vec4 fragColor;
 
   void main() {
-    vec2 sampleUv = vUv + vec2(uTime * 0.018 * uWave, uTime * 0.006 * uWave);
-    vec4 tex = texture(uAtlas, vec3(sampleUv, vTile));
+    vec2 flowA = vec2(uTime * 0.018, uTime * 0.006);
+    vec2 flowB = vec2(-uTime * 0.011, uTime * 0.015);
+    vec4 tex = texture(uAtlas, vec3(vUv + flowA * uWave, vTile));
+    // A second, slower scroll layer gives water a moving shimmer without
+    // touching the solid material or re-meshing any chunk.
+    if (uWave > 0.5) {
+      vec4 tex2 = texture(uAtlas, vec3(vUv + flowB, vTile));
+      tex.rgb = mix(tex.rgb, tex2.rgb, 0.18);
+    }
     if (tex.a < uAlphaTest) discard;
 
     vec3 n = normalize(vNormal);
@@ -93,6 +109,9 @@ const terrainFragment = /* glsl */`
       + uSunColor * sunVis * vSky * (faceShade * 0.85 + sun * 0.15)) * day
       + vec3(1.0, 0.62, 0.28) * blockLight * mix(1.0, 0.45, uDaylight);
     vec3 color = tex.rgb * light * ao;
+    // Glowstone, lava and portals carry baked block light; a gentle pulse on
+    // those cells makes them feel alive while ordinary terrain stays steady.
+    color *= 1.0 + 0.05 * (0.5 + 0.5 * sin(uTime * 3.0)) * step(0.35, vLight);
 
     float fogFactor = smoothstep(uFogNear, uFogFar, vFogDepth);
     color = mix(color, uFogColor, fogFactor);

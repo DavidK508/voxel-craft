@@ -670,7 +670,7 @@ export class Entity {
     this.attackCooldown = 1.35;
     this.attackSwing = 1;
     target.hit(this.mob.damage, this);
-    manager?.onAttack?.(this);
+    manager?.onAttack?.(this, target);
   }
 
   /** Nearest living hostile mob that is a threat to this golem's village. */
@@ -701,7 +701,7 @@ export class Entity {
     this.attackCooldown = 1.2;
     this.attackSwing = 1;
     target.hit(this.mob.damage, this);
-    manager?.onAttack?.(this);
+    manager?.onAttack?.(this, target);
     if (target.dead) this.target = null;
   }
 
@@ -710,7 +710,7 @@ export class Entity {
     this.attackCooldown = 1.35;
     this.attackSwing = 1;
     player.damage(this.mob.damage, `атака (${this.name.toLowerCase()})`);
-    manager?.onAttack?.(this);
+    manager?.onAttack?.(this, player);
   }
 
   syncModel(dt) {

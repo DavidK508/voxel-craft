@@ -345,10 +345,12 @@ await test('mob attacks swing the held weapon and settle back to idle', () => {
   const player = { position: { x: 60, y: 6, z: 60 }, creative: false, dead: false, damage() {} };
   const zombie = new Entity(MOBS.zombie, { x: 0.5, y: 6, z: 0.5 });
   const cow = new Entity(MOBS.cow, { x: 2.5, y: 6, z: 0.5 });
-  const manager = { entities: [zombie, cow], onAttack: null };
+  const attacks = [];
+  const manager = { entities: [zombie, cow], onAttack: (attacker, target) => attacks.push(target) };
   const restX = zombie.model.weapon.rotation.x;
 
   zombie.attackTarget(cow, player, manager);
+  assert.deepEqual(attacks, [cow], 'attack callbacks receive the victim');
   assert.equal(zombie.attackSwing, 1, 'an attack should start a swing');
   zombie.syncModel(0.1);
   assert.notEqual(zombie.model.weapon.rotation.x, restX, 'the weapon should move during the swing');
@@ -1402,6 +1404,25 @@ await test('HUD stacks debug and online players instead of overlapping them', ()
   assert.match(stack, /id="player-list"/);
   assert.match(css, /\.hud-left-stack\s*\{[^}]*flex-direction:\s*column/);
   assert.match(css, /\.player-list\s*\{[^}]*position:\s*static/);
+});
+
+await test('terrain and sky shaders animate water, glow, stars and selection', async () => {
+  globalThis.location ??= { search: '' };
+  const { TerrainMaterials } = await import('../src/render/TerrainMaterials.js');
+  const materials = new TerrainMaterials({ dispose() {} }, 8);
+  assert.equal(materials.solid.uniforms.uWave.value, 0, 'solid terrain must not flow');
+  assert.equal(materials.water.uniforms.uWave.value, 1, 'water uses the wave path');
+  assert.equal(materials.water.transparent, true);
+  assert.equal(materials.water.uniforms.uTime, materials.uniforms.uTime, 'time uniform is shared');
+  assert.match(materials.water.vertexShader, /displaced\.y \+= 0\.025 \* uWave/);
+  assert.match(materials.water.fragmentShader, /vec4 tex2 = texture\(uAtlas, vec3\(vUv \+ flowB, vTile\)\)/);
+  assert.match(materials.water.fragmentShader, /step\(0\.35, vLight\)/);
+
+  const sky = readFileSync(new URL('../src/render/Sky.js', import.meta.url), 'utf8');
+  assert.match(sky, /uTime \* 2\.3/, 'stars twinkle over time');
+  assert.match(sky, /this\.uniforms\.uTime\.value = this\.time/);
+  const game = readFileSync(new URL('../src/game/Game.js', import.meta.url), 'utf8');
+  assert.match(game, /selection\.material\.opacity = 0\.55 \+ 0\.25 \* Math\.sin\(this\.sky\.time \* 4\)/);
 });
 
 await test('minimap projects world points around the player', () => {

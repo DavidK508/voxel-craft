@@ -129,6 +129,12 @@ export class AudioManager {
     this.burst({ frequency: 500, duration: 0.12, gain: 0.08, q: 0.5 });
   }
 
+  /** Short impact for a creature striking another creature. */
+  playHit() {
+    this.burst({ frequency: 260, duration: 0.09, gain: 0.13, q: 0.8 });
+    this.tone({ frequency: 110, duration: 0.07, gain: 0.05, type: 'triangle' });
+  }
+
   playEat() {
     this.burst({ frequency: 900, duration: 0.08, gain: 0.08, q: 0.5 });
     this.burst({ frequency: 700, duration: 0.08, gain: 0.06, q: 0.5, delay: 0.12 });

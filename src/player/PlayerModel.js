@@ -69,7 +69,10 @@ export class PlayerModel {
     this.group = new THREE.Group();
     this.group.visible = false;
     this.walkPhase = 0;
+    this.swingAmount = 0;
     this.sneakAmount = 0;
+    this.landSquash = 0;
+    this.wasGrounded = false;
     this.name = '';
     this.appearance = normalizeAppearance(appearance);
     this.appliedAppearance = this.appearance;
@@ -340,12 +343,21 @@ export class PlayerModel {
     this.group.rotation.y = yaw;
 
     const speed = Math.hypot(state.velocity?.x ?? 0, state.velocity?.z ?? 0);
-    if (speed > 0.35 && state.onGround !== false) {
+    const grounded = state.onGround !== false;
+    if (speed > 0.35 && grounded) {
       this.walkPhase += dt * speed * 2.4;
     }
-    const swing = Math.min(0.85, speed * 0.28) * Math.sin(this.walkPhase);
+    // Damping the target swing lets arms and legs settle when the player stops
+    // instead of freezing at whatever phase the last step happened to be in.
+    const targetSwing = grounded ? Math.min(0.85, speed * 0.28) : 0;
+    this.swingAmount += (targetSwing - this.swingAmount) * Math.min(1, dt * 10);
+    const swing = this.swingAmount * Math.sin(this.walkPhase);
     const target = state.sneaking ? 1 : 0;
     this.sneakAmount += (target - this.sneakAmount) * Math.min(1, dt * 10);
+
+    if (grounded && !this.wasGrounded) this.landSquash = 1;
+    this.wasGrounded = grounded;
+    this.landSquash = Math.max(0, this.landSquash - dt * 4);
 
     this.leftLeg.rotation.x = swing;
     this.rightLeg.rotation.x = -swing;
@@ -353,8 +365,9 @@ export class PlayerModel {
     this.rightArm.rotation.x = swing * 0.85;
     this.head.rotation.x = pitch;
     this.body.rotation.x = -this.sneakAmount * 0.28;
+    this.body.scale.y = 1 - this.landSquash * 0.08;
     this.head.position.y = 1.44 - this.sneakAmount * 0.12;
-    this.group.position.y -= this.sneakAmount * 0.08;
+    this.group.position.y -= this.sneakAmount * 0.08 + this.landSquash * 0.04;
   }
 
   dispose() {

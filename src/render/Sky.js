@@ -21,6 +21,7 @@ const skyFragment = /* glsl */`
   uniform vec3 uMoonDir;
   uniform float uStars;
   uniform float uDaylight;
+  uniform float uTime;
   varying vec3 vDir;
 
   float hash(vec3 p) {
@@ -48,7 +49,7 @@ const skyFragment = /* glsl */`
       vec3 cell = floor(dir * 420.0);
       float star = hash(cell);
       if (star > 0.9975) {
-        float twinkle = 0.6 + 0.4 * sin((cell.x + cell.y + cell.z) * 12.0);
+        float twinkle = 0.55 + 0.45 * sin(uTime * 2.3 + (cell.x + cell.y + cell.z) * 12.0);
         color += vec3(0.8, 0.9, 1.0) * uStars * twinkle * smoothstep(-0.05, 0.3, h);
       }
     }
@@ -102,6 +103,7 @@ export class Sky {
       uMoonDir: { value: new THREE.Vector3(-0.4, -0.8, -0.2).normalize() },
       uStars: { value: 0 },
       uDaylight: { value: 1 },
+      uTime: { value: 0 },
     };
 
     const material = new THREE.ShaderMaterial({
@@ -167,6 +169,7 @@ export class Sky {
     this.uniforms.uMoonDir.value.copy(this.moonDir);
     this.uniforms.uStars.value = 1 - day;
     this.uniforms.uDaylight.value = day;
+    this.uniforms.uTime.value = this.time;
 
     this.fogColor.copy(horizon);
 

@@ -1923,6 +1923,11 @@ export class Game {
       });
       this.entities.onBossSpawn = (boss) => this.hud.toast(`${boss.name} пробудился в Крае!`, 3200);
       this.entities.onBossDefeat = (boss) => this.hud.toast(`${boss.name} побеждён!`, 3400);
+      // Hits on other creatures get their own impact sound; player damage
+      // already triggers the hurt cue below.
+      this.entities.onAttack = (attacker, target) => {
+        if (target !== this.player) this.audio.playHit();
+      };
       this.selection = this.createSelectionBox();
 
       if (loadedSave) {
@@ -3592,6 +3597,9 @@ export class Game {
       daylight: environment.daylight,
       time: this.sky.time,
     });
+    if (this.selection?.visible) {
+      this.selection.material.opacity = 0.55 + 0.25 * Math.sin(this.sky.time * 4);
+    }
     this.renderer.setClearColor(environment.fogColor, 1);
   }
 }
