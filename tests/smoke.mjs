@@ -505,6 +505,63 @@ await test('fresh games spawn inside a village with crops and a livestock farm',
   assert.ok((counts.get(60) ?? 0) > 0, 'village farm should store hay');
 });
 
+await test('villages place seven distinct houses with doors, windows and paths', () => {
+  const seed = 424242;
+  const spawn = findSpawn(seed);
+  const village = nearbyVillages(spawn.x, spawn.z, seed)[0];
+
+  const collect = (chunkAt) => {
+    const blocks = new Map();
+    const minX = village.x - 32;
+    const maxX = village.x + 32;
+    const minZ = village.z - 32;
+    const maxZ = village.z + 32;
+    for (let cz = Math.floor(minZ / CHUNK_SIZE); cz <= Math.floor(maxZ / CHUNK_SIZE); cz++) {
+      for (let cx = Math.floor(minX / CHUNK_SIZE); cx <= Math.floor(maxX / CHUNK_SIZE); cx++) {
+        const chunk = chunkAt(cx, cz);
+        for (let i = 0; i < chunk.blocks.length; i++) {
+          const id = chunk.blocks[i];
+          if (id === 0) continue;
+          const wx = cx * CHUNK_SIZE + (i & 15);
+          const wz = cz * CHUNK_SIZE + ((i >> 4) & 15);
+          blocks.set(`${wx},${i >> 8},${wz}`, id);
+        }
+      }
+    }
+    return blocks;
+  };
+
+  const blocks = collect((cx, cz) => generateChunk(cx, cz, seed));
+  const doorSpots = new Set();
+  let doors = 0;
+  let glass = 0;
+  let paths = 0;
+  for (const [key, id] of blocks) {
+    if (id >= 81 && id <= 96) {
+      doors++;
+      const [x, , z] = key.split(',').map(Number);
+      doorSpots.add(`${x},${z}`);
+    }
+    if (id === 12) glass++;
+    if (id === 10) paths++;
+  }
+  assert.ok(doors >= 14, `expected seven two-block doors, found ${doors}`);
+  assert.ok(doorSpots.size >= 7, `expected seven separate house entrances, found ${doorSpots.size}`);
+  assert.ok(glass >= 24, `expected house windows, found ${glass} glass blocks`);
+  assert.ok(paths >= 30, `expected gravel lanes, found ${paths} path blocks`);
+  const spots = [...doorSpots].map((spot) => spot.split(',').map(Number));
+  for (let i = 0; i < spots.length; i++) {
+    for (let j = i + 1; j < spots.length; j++) {
+      assert.ok(Math.hypot(spots[i][0] - spots[j][0], spots[i][1] - spots[j][1]) > 3,
+        `houses should not overlap: ${spots[i]} and ${spots[j]}`);
+    }
+  }
+
+  const fresh = new WorldGenerator(seed);
+  const again = collect((cx, cz) => fresh.generateChunk(cx, cz));
+  assert.deepEqual([...again].sort(), [...blocks].sort(), 'village layout must be deterministic');
+});
+
 await test('padded volume copies center and all eight neighbours', () => {
   const center = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
   const east = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
@@ -991,6 +1048,30 @@ await test('monsters hunt animals and villagers, golems defend them', () => {
   const zombieHealth = zombieCow.health;
   golem.update(1 / 60, world, player, manager);
   assert.ok(zombieCow.health < zombieHealth, 'golem should protect the animals');
+});
+
+await test('creatures steer around walls instead of pressing into them', () => {
+  const solids = new Set();
+  for (let x = -10; x <= 40; x++) {
+    for (let z = -12; z <= 12; z++) solids.add(`${x},0,${z}`);
+  }
+  // A short wall directly in front of the creature, open ground at z >= 3.
+  for (let z = -2; z <= 2; z++) {
+    for (let y = 1; y <= 3; y++) solids.add(`${1},${y},${z}`);
+  }
+  const world = makeSetWorld(solids);
+  const player = { position: { x: 100, y: 2, z: 100 }, creative: false, dead: false };
+  const mob = { ...MOBS.villager, speed: 4 };
+  const villager = new Entity(mob, { x: 0.5, y: 1.02, z: 0.5 }, { home: { x: 20, z: 0 } });
+  const manager = { entities: [villager], onAttack: null };
+
+  const steered = villager.steerAround(world, 1, 0, 0.1);
+  assert.equal(steered.detour, true, 'a blocked route should produce a detour');
+  assert.ok(Math.abs(steered.z) > 0.1, 'the detour turns sideways');
+
+  for (let i = 0; i < 900; i++) villager.update(1 / 30, world, player, manager);
+  assert.ok(villager.position.x > 2, `creature should get around the wall, got x=${villager.position.x.toFixed(1)}`);
+  assert.equal(villager.dead, false);
 });
 
 await test('nether portal leads to a hell with pigs', () => {

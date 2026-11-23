@@ -7,6 +7,11 @@ import { buildMobModel } from './models.js';
 const GRAVITY = 26;
 const HALF = 0.3;
 const TAU = Math.PI * 2;
+// Angles tried (in radians) when the direct route is blocked. Keeping the
+// first clear turn small makes creatures slide around corners instead of
+// pressing their face into a wall forever.
+const AVOID_ANGLES = [0.6, -0.6, 1.15, -1.15, 1.75, -1.75, Math.PI];
+const AVOID_DETOUR_SECONDS = 0.7;
 
 function randomAngle() {
   return Math.random() * TAU;
@@ -66,6 +71,8 @@ export class Entity {
     this.huntTarget = null;
     this.huntTimer = 0;
     this.walkPhase = Math.random() * TAU;
+    this.detourTimer = 0;
+    this.detourAngle = 0;
     this.time = Math.random() * 10;
     this.model = buildMobModel(mob.model);
     this.model.group.position.copy(this.position);
@@ -150,6 +157,56 @@ export class Entity {
       if (world.isSolidAt(bx, y, bz)) return y + 1;
     }
     return null;
+  }
+
+  /**
+   * Open-loop wandering and straight-line homing both get stuck on walls: the
+   * collision reverts the blocked axis but the AI keeps pushing next frame.
+   * Probe a little ahead and rotate the desired velocity towards the first
+   * clear route. The chosen detour is held briefly so the creature does not
+   * jitter between equally good left/right turns.
+   */
+  steerAround(world, x, z, dt) {
+    const length = Math.hypot(x, z);
+    if (length < 0.04 || !world?.getBlock) return { x, z, detour: false };
+    const nx = x / length;
+    const nz = z / length;
+    const direction = (angle) => {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      return { x: nx * cos - nz * sin, z: nx * sin + nz * cos };
+    };
+    const clear = (angle, distance) => {
+      const dir = direction(angle);
+      return !this.collides(
+        world,
+        this.position.x + dir.x * distance,
+        this.position.y,
+        this.position.z + dir.z * distance,
+      );
+    };
+
+    if (clear(0, 0.85) && clear(0, 1.45)) {
+      this.detourTimer = 0;
+      this.detourAngle = 0;
+      return { x, z, detour: false };
+    }
+
+    if (this.detourTimer > 0 && clear(this.detourAngle, 0.85)) {
+      this.detourTimer -= dt;
+      const dir = direction(this.detourAngle);
+      return { x: dir.x * length, z: dir.z * length, detour: true };
+    }
+
+    for (const angle of AVOID_ANGLES) {
+      if (!clear(angle, 0.85)) continue;
+      if (!clear(angle, 1.45) && angle !== Math.PI) continue;
+      this.detourAngle = angle;
+      this.detourTimer = AVOID_DETOUR_SECONDS;
+      const dir = direction(angle);
+      return { x: dir.x * length, z: dir.z * length, detour: true };
+    }
+    return { x, z, detour: false };
   }
 
   update(dt, world, player, manager) {
@@ -319,6 +376,15 @@ export class Entity {
       if (this.state === 'wander' || this.state === 'return') {
         moveX = -Math.sin(this.yaw) * 0.55;
         moveZ = -Math.cos(this.yaw) * 0.55;
+      }
+    }
+
+    if (!this.aquatic && !this.flying) {
+      const steered = this.steerAround(world, moveX, moveZ, dt);
+      moveX = steered.x;
+      moveZ = steered.z;
+      if (steered.detour && this.state !== 'chase') {
+        this.yaw = Math.atan2(-moveX, -moveZ);
       }
     }
 

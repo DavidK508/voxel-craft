@@ -558,12 +558,12 @@ export class WorldGenerator {
 
   /** Villages whose footprint touches this chunk. */
   villagesNearChunk(cx, cz) {
-    // Villages now include a crop garden and a livestock farm out to roughly
-    // 24 blocks from the centre, so look a little further than the old plaza.
-    const minX = cx * CHUNK_SIZE - 32;
-    const maxX = (cx + 1) * CHUNK_SIZE + 32;
-    const minZ = cz * CHUNK_SIZE - 32;
-    const maxZ = (cz + 1) * CHUNK_SIZE + 32;
+    // Villages include a crop garden, livestock farm and houses out to about
+    // 28 blocks from the centre, so look a little further than the old plaza.
+    const minX = cx * CHUNK_SIZE - 36;
+    const maxX = (cx + 1) * CHUNK_SIZE + 36;
+    const minZ = cz * CHUNK_SIZE - 36;
+    const maxZ = (cz + 1) * CHUNK_SIZE + 36;
     const found = [];
     const firstCellX = Math.floor(minX / VILLAGE_CELL);
     const lastCellX = Math.floor(maxX / VILLAGE_CELL);
@@ -600,7 +600,7 @@ export class WorldGenerator {
     for (const village of villages) this.buildVillage(village, setWorld, getWorld);
     // Village floors are flat, so refresh the column tops that lie in this chunk.
     for (const village of villages) {
-      const radius = 24;
+      const radius = 28;
       for (let dz = -radius; dz <= radius; dz++) {
         for (let dx = -radius; dx <= radius; dx++) {
           if (dx * dx + dz * dz > radius * radius + 6) continue;
@@ -621,7 +621,7 @@ export class WorldGenerator {
     const desert = village.biome === BIOME.DESERT;
     const ground = desert ? ID.sand : ID.grass;
     const sub = desert ? ID.sand : ID.dirt;
-    const radius = 24;
+    const radius = 28;
 
     // Flatten a generous plaza so houses never float over uneven ground.
     for (let dz = -radius; dz <= radius; dz++) {
@@ -637,58 +637,88 @@ export class WorldGenerator {
       }
     }
 
-    // Generate a small cluster of houses with varied sizes and positions.
-    // Each house entry: { ox, oz, w, d, doorSide, style }
-    // style: 0 = standard, 1 = wide, 2 = narrow, 3 = L-shaped
+    // Seven distinct footprints around the plaza. The previous version used a
+    // single hash value for both coordinates, which produced fractional blocks
+    // (silently dropped by the Uint8Array) and five houses in the same row.
     const houseStyles = [
-      { w: 7, d: 6, door: 0, style: 0 },
-      { w: 6, d: 6, door: 1, style: 1 },
-      { w: 6, d: 7, door: 2, style: 2 },
-      { w: 8, d: 5, door: 3, style: 0 },
-      { w: 5, d: 8, door: 0, style: 3 }, // L-shaped needs special handling
+      { w: 7, d: 6, style: 0 }, // timber cottage
+      { w: 6, d: 6, style: 1 }, // red-roofed home
+      { w: 6, d: 7, style: 2 }, // stone house
+      { w: 8, d: 5, style: 3 }, // wide hall
+      { w: 5, d: 8, style: 4 }, // desert / whitewashed cottage
+      { w: 7, d: 7, style: 5 }, // garden cottage
+      { w: 6, d: 5, style: 6 }, // brick workshop with a chimney
     ];
 
-    // Shuffle-ish placement using deterministic hash based on seed+house-index
-    const placedHouses = [];
-    const usedPositions = new Set();
+    const reserved = [
+      { x0: vx - 6, z0: vz - 6, x1: vx + 6, z1: vz + 6 }, // well and street lamps
+      { x0: vx - 9, z0: vz + 11, x1: vx + 9, z1: vz + 21 }, // crop garden
+      { x0: vx + 12, z0: vz - 9, x1: vx + 24, z1: vz + 9 }, // livestock farm
+    ];
+    const overlaps = (a, b, margin) => (
+      a.x0 - margin <= b.x1 && a.x1 + margin >= b.x0
+      && a.z0 - margin <= b.z1 && a.z1 + margin >= b.z0
+    );
+    const inside = (rect) => (
+      rect.x0 >= vx - radius + 2 && rect.x1 <= vx + radius - 2
+      && rect.z0 >= vz - radius + 2 && rect.z1 <= vz + radius - 2
+    );
 
-    for (let i = 0; i < 5; i++) {
-      const hDef = houseStyles[i % houseStyles.length];
-      // Compute a semi-random offset from the plaza centre.
-      const offsetSeed = `${vx},${vz},${i}`;
-      let ox = 0, oz = 0, attempts = 0;
-      while (attempts < 20) {
-        // Deterministic but varied offset
-        const h = hash2i(vx + i, vz + i, this.seed ^ 0x9e8c);
-        ox = ((h % 15) - 7); // -7..7
-        oz = ((Math.floor(h / 16) % 15) - 7);
-        const posKey = `${vx + ox},${vz + oz}`;
-        if (!usedPositions.has(posKey)) break;
-        attempts++;
-      }
-      if (attempts >= 20) continue; // give up this slot
-      usedPositions.add(`${vx + ox},${vz + oz}`);
-
-      // Scale dimensions a bit based on style.
-      let w = hDef.w, d = hDef.d, doorSide = hDef.door;
-      if (hDef.style === 1) { w = 8; d = 5; }
-      if (hDef.style === 2) { w = 5; d = 7; }
-      if (hDef.style === 3) {
-        // L-shape: we'll build two connected sections; for simplicity make a larger rectangle
-        // but mark it as style 3 for interior variations.
-        w = 9; d = 6;
-      }
-      placedHouses.push({ ox, oz, w, d, door: doorSide, style: hDef.style });
+    // Candidate top-left offsets form a loose ring around the plaza. Sorting by
+    // distance plus deterministic jitter keeps the layout stable for a seed.
+    const candidates = [];
+    for (let oz = -20; oz <= 9; oz += 5) {
+      for (let ox = -23; ox <= 9; ox += 5) candidates.push({ ox, oz });
     }
-
-    // Build each house.
-    placedHouses.forEach((h) => {
-      const hx = vx + h.ox;
-      const hz = vz + h.oz;
-      this.buildHouse(hx, hz, base, h.w, h.d, h.door, set, desert, h.style === 0);
+    for (let ox = -20; ox <= 8; ox += 7) {
+      candidates.push({ ox, oz: -26 }, { ox, oz: -21 }, { ox, oz: 23 }, { ox, oz: 26 });
+    }
+    candidates.sort((a, b) => {
+      const score = (c, salt) => Math.hypot(c.ox + 3, c.oz + 3)
+        + hash2i(vx + c.ox, vz + c.oz, this.seed ^ salt) * 9;
+      return score(a, 0x9e8c) - score(b, 0x9e8c);
     });
 
-    // Well in the middle of the plaza.
+    const doorTowardsPlaza = (ox, oz, w, d) => {
+      const cx = ox + (w - 1) / 2;
+      const cz = oz + (d - 1) / 2;
+      if (Math.abs(cx) > Math.abs(cz)) return cx > 0 ? 3 : 1;
+      return cz > 0 ? 0 : 2;
+    };
+
+    const placedHouses = [];
+    for (let i = 0; i < houseStyles.length; i++) {
+      const def = houseStyles[i];
+      for (let n = 0; n < candidates.length; n++) {
+        const cand = candidates[(n + i * 3) % candidates.length];
+        const rect = {
+          x0: vx + cand.ox,
+          z0: vz + cand.oz,
+          x1: vx + cand.ox + def.w - 1,
+          z1: vz + cand.oz + def.d - 1,
+        };
+        if (!inside(rect)) continue;
+        if (reserved.some((zone) => overlaps(rect, zone, 1))) continue;
+        if (placedHouses.some((house) => overlaps(rect, house.rect, 1))) continue;
+        placedHouses.push({
+          ...def,
+          ox: cand.ox,
+          oz: cand.oz,
+          door: doorTowardsPlaza(cand.ox, cand.oz, def.w, def.d),
+          rect,
+        });
+        break;
+      }
+    }
+
+    for (const house of placedHouses) {
+      this.buildHouse(
+        vx + house.ox, vz + house.oz, base,
+        house.w, house.d, house.door, set, desert, house.style,
+      );
+    }
+
+    // Well in the middle of the plaza, with a wooden rim above the cobble.
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
         const wx = vx + dx;
@@ -696,7 +726,8 @@ export class WorldGenerator {
         const edge = Math.abs(dx) === 2 || Math.abs(dz) === 2;
         if (edge) {
           set(wx, base + 1, wz, 4);
-          if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) set(wx, base + 2, wz, 5);
+          if ((Math.abs(dx) === 2 && Math.abs(dz) <= 1)
+            || (Math.abs(dz) === 2 && Math.abs(dx) <= 1)) set(wx, base + 2, wz, 5);
         } else {
           set(wx, base, wz, 11);
           set(wx, base + 1, wz, 0);
@@ -715,6 +746,49 @@ export class WorldGenerator {
 
     this.buildGarden(vx, vz, base, set, desert);
     this.buildFarm(vx, vz, base, set, desert);
+    this.buildVillagePaths(vx, vz, base, set, desert, placedHouses);
+  }
+
+  /** Gravel/sandstone lanes from the well to every house, the garden and the farm. */
+  buildVillagePaths(vx, vz, base, set, desert, houses) {
+    const paving = desert ? ID.sandstone : ID.gravel;
+    const pave = (x, z) => {
+      const dx = x - vx;
+      const dz = z - vz;
+      if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) return; // keep the well clear
+      if (dx >= 14 && dx <= 22 && dz >= -7 && dz <= 7) return; // leave the paddock alone
+      if (dz >= 14 && dz <= 18 && dx >= -6 && dx <= 6) return; // leave the crops alone
+      if (houses.some((h) => x >= vx + h.ox && x <= vx + h.ox + h.w - 1
+        && z >= vz + h.oz && z <= vz + h.oz + h.d - 1)) return;
+      set(x, base, z, paving);
+    };
+    const lane = (x0, z0, x1, z1) => {
+      let x = x0;
+      let z = z0;
+      const dx = Math.abs(x1 - x0);
+      const dz = Math.abs(z1 - z0);
+      const sx = x0 < x1 ? 1 : -1;
+      const sz = z0 < z1 ? 1 : -1;
+      let error = dx - dz;
+      for (let guard = 0; guard < 128; guard++) {
+        pave(x, z);
+        pave(x + 1, z);
+        if (x === x1 && z === z1) break;
+        const twice = error * 2;
+        if (twice > -dz) { error -= dz; x += sx; }
+        if (twice < dx) { error += dx; z += sz; }
+      }
+    };
+
+    for (const house of houses) {
+      const doorX = house.door === 1 ? house.w - 1 : house.door === 3 ? 0 : Math.floor(house.w / 2);
+      const doorZ = house.door === 0 ? 0 : house.door === 2 ? house.d - 1 : Math.floor(house.d / 2);
+      const dx = house.door === 1 ? 1 : house.door === 3 ? -1 : 0;
+      const dz = house.door === 2 ? 1 : house.door === 0 ? -1 : 0;
+      lane(vx, vz, vx + house.ox + doorX + dx * 2, vz + house.oz + doorZ + dz * 2);
+    }
+    lane(vx, vz, vx, vz + 13); // garden gate
+    lane(vx, vz, vx + 14, vz + 2); // livestock gate
   }
 
   /** Fenced crop garden south of the plaza with four different crops. */
@@ -849,11 +923,21 @@ export class WorldGenerator {
 
   /**
    * Small village house. `door` is the wall index: 0 north, 1 east, 2 south, 3 west.
+   * The style changes the palette, roof silhouette and interior so a village
+   * reads as a cluster of different buildings instead of five identical boxes.
    */
-  buildHouse(x0, z0, base, width, depth, door, set, desert, withCrafting) {
-    const wall = desert ? 9 : 5;
-    const corner = 4;
-    const height = 3;
+  buildHouse(x0, z0, base, width, depth, door, set, desert, style = 0) {
+    const styleIndex = style % 7;
+    const walls = [5, 5, 28, 6, desert ? 9 : 42, 5, 23];
+    const corners = [4, 4, 28, 6, desert ? 9 : 42, 34, 23];
+    const roofs = [5, 43, 4, 6, desert ? 9 : 42, 45, 23];
+    const trims = [4, 42, 27, 5, 44, 6, 4];
+    const wall = walls[styleIndex];
+    const corner = corners[styleIndex];
+    const roof = roofs[styleIndex];
+    const trim = trims[styleIndex];
+    const height = styleIndex === 5 ? 4 : 3;
+    const isPitched = styleIndex === 1 || styleIndex === 4 || styleIndex === 5;
     for (let z = 0; z < depth; z++) {
       for (let x = 0; x < width; x++) {
         const wx = x0 + x;
@@ -874,26 +958,41 @@ export class WorldGenerator {
               || (door === 3 && x === 0 && z === Math.floor(depth / 2))
             );
             if (isDoor) id = getDoorId(door, false, y);
-            // Windows on the upper row.
+            // Windows on the upper row, skipping the doorway column.
             const window = y === 1 && (
               (z === 0 && x > 0 && x < width - 1 && x !== Math.floor(width / 2))
               || (z === depth - 1 && x > 0 && x < width - 1 && x !== Math.floor(width / 2))
               || (x === 0 && z > 0 && z < depth - 1)
               || (x === width - 1 && z > 0 && z < depth - 1)
             );
-            if (window && id !== ID.air && !isDoor) id = 12;
+            if (window && !isDoor) id = ID.glass;
             set(wx, base + 1 + y, wz, id);
           }
         }
-        set(wx, base + 1 + height, wz, wall);
-        // A slab-like roof edge one block higher around the border.
-        if (borderX || borderZ) set(wx, base + 2 + height, wz, wall);
+        set(wx, base + 1 + height, wz, roof);
+        // A trim course around the eaves, with a stepped ridge for pitched roofs.
+        if (borderX || borderZ) set(wx, base + 2 + height, wz, trim);
+        else if (isPitched) set(wx, base + 2 + height, wz, roof);
+        if (isPitched && x > 0 && x < width - 1 && z > 0 && z < depth - 1) {
+          set(wx, base + 3 + height, wz, roof);
+        }
       }
     }
-    // Interior furnishing.
-    set(x0 + 1, base + 1, z0 + 1, withCrafting ? 21 : 22);
-    set(x0 + width - 2, base + 1, z0 + depth - 2, 48);
+    // Interior furnishing varies with the style.
+    set(x0 + 1, base + 1, z0 + 1, styleIndex === 0 || styleIndex === 3 ? 21 : 22);
+    if (styleIndex !== 1 && styleIndex !== 4) set(x0 + width - 2, base + 1, z0 + depth - 2, 48);
+    if (styleIndex === 4 || styleIndex === 5) {
+      set(x0 + 2, base + 1, z0 + 1, 42);
+      set(x0 + 2, base + 1, z0 + 2, 44); // a cosy two-tone bed
+    }
     set(x0 + Math.floor(width / 2), base + 1, z0 + Math.floor(depth / 2), 29);
+    if (styleIndex === 6) {
+      // Brick workshop chimney rising through the roof.
+      const cx = x0 + width - 2;
+      const cz = z0 + 1;
+      for (let y = base + 2 + height; y <= base + 5 + height; y++) set(cx, y, cz, 4);
+      set(cx, base + 6 + height, cz, 29);
+    }
   }
   /* ------------------------------------------------------------------ */
   /* Nether                                                              */
