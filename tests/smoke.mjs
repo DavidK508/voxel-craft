@@ -301,6 +301,64 @@ await test('item registry exposes blocks, tools and food', () => {
   assert.equal(getItem(69).placeBlock, 69);
 });
 
+await test('extra tool tiers, armor sets and creature materials are registered', () => {
+  assert.equal(getItem(316).key, 'gold_pickaxe');
+  assert.equal(getItem(316).tool.tier, 2);
+  assert.equal(getItem(319).key, 'gold_sword');
+  assert.equal(getItem(320).key, 'netherite_pickaxe');
+  assert.equal(getItem(320).tool.tier, 5);
+  assert.equal(getItem(323).key, 'netherite_sword');
+  assert.equal(getItem(404).tool, undefined);
+  assert.equal(getArmorInfo(512).defense, 2);
+  assert.equal(getArmorInfo(516).defense, 4);
+  assert.equal(createItemStack(519).durability, 600);
+
+  for (const id of [474, 475, 476, 477, 478]) assert.ok(getItem(id), `item ${id} should exist`);
+  assert.equal(getItem(474).key, 'netherite_ingot');
+  assert.equal(getItem(478).key, 'camel_hide');
+
+  const ingot = findRecipe([405, 405, 25, 25, 404, null, null, null, null], 3);
+  assert.equal(ingot?.result.id, 474);
+  const goldSword = findRecipe([404, null, null, 404, null, null, 400, null, null], 3);
+  assert.equal(goldSword?.result.id, 319);
+  const netherHelmet = findRecipe([474, 474, 474, 474, null, 474, null, null, null], 3);
+  assert.equal(netherHelmet?.result.id, 516);
+
+  assert.ok(MOBS.camel.drops.some((drop) => drop.id === 478), 'camels yield hides');
+  assert.ok(MOBS.spider.drops.some((drop) => drop.id === 476), 'spiders yield fangs');
+  assert.ok(MOBS.ender_dragon.drops.some((drop) => drop.id === 475), 'dragons yield scales');
+  assert.ok(MOBS.wolf.drops.some((drop) => drop.id === 477), 'wolves yield fur');
+});
+
+await test('hostile mobs carry visible weapons', async () => {
+  const { buildMobModel } = await import('../src/entities/models.js');
+  for (const key of ['zombie', 'skeleton', 'spider', 'enderman', 'blaze']) {
+    const model = buildMobModel(key);
+    assert.ok(model.weapon, `${key} should have a weapon pivot`);
+    assert.ok(model.weapon.children.length > 0, `${key} weapon should have geometry`);
+  }
+  assert.equal(buildMobModel('cow').weapon, undefined, 'peaceful animals are unarmed');
+});
+
+await test('mob attacks swing the held weapon and settle back to idle', () => {
+  const world = makeFlatWorld(6);
+  const player = { position: { x: 60, y: 6, z: 60 }, creative: false, dead: false, damage() {} };
+  const zombie = new Entity(MOBS.zombie, { x: 0.5, y: 6, z: 0.5 });
+  const cow = new Entity(MOBS.cow, { x: 2.5, y: 6, z: 0.5 });
+  const manager = { entities: [zombie, cow], onAttack: null };
+  const restX = zombie.model.weapon.rotation.x;
+
+  zombie.attackTarget(cow, player, manager);
+  assert.equal(zombie.attackSwing, 1, 'an attack should start a swing');
+  zombie.syncModel(0.1);
+  assert.notEqual(zombie.model.weapon.rotation.x, restX, 'the weapon should move during the swing');
+
+  for (let i = 0; i < 20; i++) zombie.syncModel(0.05);
+  assert.equal(zombie.attackSwing, 0, 'the swing should finish');
+  assert.equal(zombie.model.weapon.rotation.x, restX, 'the weapon should return to its rest pose');
+  assert.ok(Number.isFinite(zombie.model.group.rotation.y), 'visual yaw stays finite');
+});
+
 await test('noise is deterministic and bounded', () => {
   const a = mulberry32(12345);
   const b = mulberry32(12345);

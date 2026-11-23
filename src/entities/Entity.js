@@ -73,6 +73,8 @@ export class Entity {
     this.walkPhase = Math.random() * TAU;
     this.detourTimer = 0;
     this.detourAngle = 0;
+    this.attackSwing = 0;
+    this.visualYaw = this.yaw;
     this.time = Math.random() * 10;
     this.model = buildMobModel(mob.model);
     this.model.group.position.copy(this.position);
@@ -666,6 +668,7 @@ export class Entity {
     }
     if (this.attackCooldown > 0 || !this.mob.damage || !target || target.dead) return;
     this.attackCooldown = 1.35;
+    this.attackSwing = 1;
     target.hit(this.mob.damage, this);
     manager?.onAttack?.(this);
   }
@@ -696,6 +699,7 @@ export class Entity {
   attackEntity(target, manager) {
     if (this.attackCooldown > 0 || !this.mob.damage || !target || target.dead) return;
     this.attackCooldown = 1.2;
+    this.attackSwing = 1;
     target.hit(this.mob.damage, this);
     manager?.onAttack?.(this);
     if (target.dead) this.target = null;
@@ -704,24 +708,38 @@ export class Entity {
   attackPlayer(player, manager) {
     if (this.attackCooldown > 0 || !this.mob.damage) return;
     this.attackCooldown = 1.35;
+    this.attackSwing = 1;
     player.damage(this.mob.damage, `атака (${this.name.toLowerCase()})`);
     manager?.onAttack?.(this);
   }
 
   syncModel(dt) {
     const group = this.model.group;
-    group.position.copy(this.position);
-    group.rotation.y = this.yaw;
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (speed > 0.1) this.walkPhase += dt * (4 + speed * 2.2);
+
+    // Smooth the visual heading so AI course corrections do not snap the mesh.
+    const yawDelta = ((this.yaw - this.visualYaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    this.visualYaw += yawDelta * Math.min(1, dt * 10);
+    group.rotation.y = this.visualYaw;
+    group.position.copy(this.position);
+    group.position.y += Math.min(speed, 4) * 0.012 * Math.sin(this.walkPhase * 2);
+
+    // A strike starts at 1 and decays; sin() peaks halfway through the swing.
+    this.attackSwing = Math.max(0, this.attackSwing - dt * 2.6);
+    const strike = this.attackSwing > 0 ? Math.sin((1 - this.attackSwing) * Math.PI) : 0;
     const swing = speed > 0.1 ? Math.sin(this.walkPhase) * 0.55 : 0;
     this.model.legs?.forEach((leg, index) => {
       const phase = index % 2 === 0 ? swing : -swing;
-      leg.rotation.x = phase;
+      leg.rotation.x = phase + strike * 0.2;
     });
     this.model.arms?.forEach((arm, index) => {
-      arm.rotation.x = index % 2 === 0 ? -swing * 0.6 : swing * 0.6;
+      const idle = index % 2 === 0 ? -swing * 0.6 : swing * 0.6;
+      arm.rotation.x = idle + (index === 1 ? -strike * 1.5 : strike * 0.4);
     });
+    if (this.model.weapon) {
+      this.model.weapon.rotation.x = (this.model.weapon.userData.restX ?? 0) - strike * 1.35;
+    }
     if (this.model.wings) {
       const flap = Math.sin(this.time * 16 + this.walkPhase) * 0.55;
       for (let i = 0; i < this.model.wings.length; i++) {
@@ -730,16 +748,35 @@ export class Entity {
       }
     }
     if (this.model.head) {
-      this.model.head.rotation.x = speed > 0.1 ? Math.sin(this.walkPhase * 2) * 0.05 : 0;
+      const head = this.model.head;
+      head.rotation.x = speed > 0.1
+        ? Math.sin(this.walkPhase * 2) * 0.05
+        : Math.sin(this.time * 1.8 + this.walkPhase) * 0.02;
+      const focus = this.state === 'chase' ? this.huntTarget : this.state === 'guard' ? this.target : null;
+      let look = 0;
+      if (focus && !focus.dead) {
+        const angle = Math.atan2(
+          -(focus.position.x - this.position.x),
+          -(focus.position.z - this.position.z),
+        );
+        look = Math.max(-0.7, Math.min(0.7, ((angle - this.visualYaw + Math.PI) % TAU + TAU) % TAU - Math.PI));
+      }
+      head.rotation.y += (look - head.rotation.y) * Math.min(1, dt * 8);
     }
     if (this.model.rods) {
       for (let i = 0; i < this.model.rods.length; i++) {
-        this.model.rods[i].rotation.y = this.time * (1.4 + i * 0.1) + i;
+        // Opposite spins make the blaze read as orbiting rather than rotating.
+        this.model.rods[i].rotation.y = (i % 2 ? -1 : 1) * (this.time * (1.4 + i * 0.1) + i);
       }
     }
-    // Flash red while hurt without allocating a new material every frame.
+    if (this.type === 'creeper') {
+      const pulse = this.fuse > 0 ? 1 + Math.sin(this.time * 24) * this.fuse * 0.06 : 1;
+      group.scale.setScalar(pulse);
+    }
+    // Hurt feedback: keep the existing visibility flash and add a small jolt.
     const flash = this.hurtTime > 0;
     group.visible = flash ? Math.floor(this.hurtTime * 20) % 2 === 0 : true;
+    group.rotation.z = flash ? Math.sin(this.time * 40) * 0.06 : 0;
   }
 
   hit(amount, attacker = null) {

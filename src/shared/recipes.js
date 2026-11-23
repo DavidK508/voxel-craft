@@ -2,6 +2,8 @@ const WOOD = [5];
 const STONE = [4];
 const IRON = [403];
 const DIAMOND = [405];
+const GOLD = [404];
+const NETHERITE = [474];
 const LOGS = [6, 34, 36];
 
 const toolRecipes = [];
@@ -10,6 +12,8 @@ const materialSets = [
   { key: 'stone', material: STONE, pickaxe: 304, axe: 305, shovel: 306, sword: 307 },
   { key: 'iron', material: IRON, pickaxe: 308, axe: 309, shovel: 310, sword: 311 },
   { key: 'diamond', material: DIAMOND, pickaxe: 312, axe: 313, shovel: 314, sword: 315 },
+  { key: 'gold', material: GOLD, pickaxe: 316, axe: 317, shovel: 318, sword: 319 },
+  { key: 'netherite', material: NETHERITE, pickaxe: 320, axe: 321, shovel: 322, sword: 323 },
 ];
 
 for (const set of materialSets) {
@@ -26,6 +30,8 @@ const armorSets = [
   { key: 'leather', material: 420, base: 500 },
   { key: 'iron', material: 403, base: 504 },
   { key: 'diamond', material: 405, base: 508 },
+  { key: 'gold', material: 404, base: 512 },
+  { key: 'netherite', material: 474, base: 516 },
 ];
 
 for (const set of armorSets) {
@@ -50,6 +56,11 @@ export const RECIPES = Object.freeze([
   { id: 'iron_from_block', shapeless: [{ any: [31] }], result: { id: 403, count: 9 } },
   { id: 'gold_from_block', shapeless: [{ any: [32] }], result: { id: 404, count: 9 } },
   { id: 'diamond_from_block', shapeless: [{ any: [33] }], result: { id: 405, count: 9 } },
+  {
+    id: 'netherite_ingot',
+    shapeless: [{ any: [405] }, { any: [405] }, { any: [25] }, { any: [25] }, { any: [404] }],
+    result: { id: 474, count: 1 },
+  },
   { id: 'golden_apple', pattern: ['GGG', 'GAG', 'GGG'], key: { G: 404, A: 406 }, result: { id: 413, count: 1 } },
   // Fire starter ("огнемёт") and buckets.
   { id: 'flint_and_steel', shapeless: [{ any: [410] }, { any: [403] }], result: { id: 414, count: 1 } },

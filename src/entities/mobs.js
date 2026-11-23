@@ -55,21 +55,21 @@ export const MOBS = Object.freeze({
     health: 26, speed: 2.3, width: 1.1, height: 2.0,
     biomes: [BIOME.DESERT],
     group: [1, 2], spawnWeight: 0.8, tameable: true, rideable: true,
-    drops: [{ id: 420, min: 1, max: 3 }],
+    drops: [{ id: 420, min: 1, max: 3 }, { id: 478, min: 1, max: 2 }],
   },
   wolf: {
     key: 'wolf', name: 'Волк', kind: 'neutral', model: 'wolf',
     health: 10, speed: 2.4, width: 0.7, height: 0.9,
     biomes: [BIOME.FOREST, BIOME.BIRCH_FOREST, BIOME.TAIGA, BIOME.SNOWY],
-    group: [1, 3], spawnWeight: 0.8, tameable: true, damage: 2,
-    drops: [{ id: 422, min: 0, max: 1 }],
+    group: [1, 3], spawnWeight: 0.8, tameable: true, damage: 2, weapon: 'fangs',
+    drops: [{ id: 422, min: 0, max: 1 }, { id: 477, min: 1, max: 2 }],
   },
   fox: {
     key: 'fox', name: 'Лиса', kind: 'passive', model: 'fox',
     health: 8, speed: 2.3, width: 0.6, height: 0.75,
     biomes: [BIOME.FOREST, BIOME.BIRCH_FOREST, BIOME.TAIGA, BIOME.SNOWY],
     group: [1, 2], spawnWeight: 0.7,
-    drops: [{ id: 421, min: 0, max: 1 }],
+    drops: [{ id: 421, min: 0, max: 1 }, { id: 477, min: 0, max: 1 }],
   },
   bee: {
     key: 'bee', name: 'Пчела', kind: 'passive', model: 'bee',
@@ -107,17 +107,20 @@ export const MOBS = Object.freeze({
   zombie: {
     key: 'zombie', name: 'Зомби', kind: 'hostile', model: 'zombie',
     health: 20, speed: 1.7, width: 0.6, height: 1.9,
-    damage: 3, attackRange: 1.5, drops: [{ id: 422, min: 0, max: 1 }],
+    damage: 3, attackRange: 1.5, weapon: 'sword',
+    drops: [{ id: 422, min: 0, max: 1 }, { id: 476, min: 0, max: 1 }],
   },
   skeleton: {
     key: 'skeleton', name: 'Скелет', kind: 'hostile', model: 'skeleton',
     health: 16, speed: 1.55, width: 0.6, height: 1.9,
-    damage: 2, attackRange: 1.6, drops: [{ id: 422, min: 1, max: 2 }],
+    damage: 2, attackRange: 1.6, weapon: 'bow',
+    drops: [{ id: 422, min: 1, max: 2 }, { id: 421, min: 0, max: 2 }],
   },
   spider: {
     key: 'spider', name: 'Паук', kind: 'hostile', model: 'spider',
     health: 14, speed: 2.1, width: 1.1, height: 0.75,
-    damage: 2, attackRange: 1.4, drops: [{ id: 423, min: 1, max: 2 }],
+    damage: 2, attackRange: 1.4, weapon: 'fangs',
+    drops: [{ id: 423, min: 1, max: 2 }, { id: 476, min: 1, max: 2 }],
   },
   creeper: {
     key: 'creeper', name: 'Крипер', kind: 'hostile', model: 'creeper',
@@ -128,13 +131,13 @@ export const MOBS = Object.freeze({
   enderman: {
     key: 'enderman', name: 'Странник Края', kind: 'hostile', model: 'enderman',
     health: 30, speed: 2.0, width: 0.6, height: 2.6,
-    damage: 4, attackRange: 1.8, dimensions: ['end'],
+    damage: 4, attackRange: 1.8, dimensions: ['end'], weapon: 'claws',
     drops: [{ id: 425, min: 1, max: 2 }],
   },
   blaze: {
     key: 'blaze', name: 'Всполох', kind: 'hostile', model: 'blaze',
     health: 20, speed: 1.2, width: 0.7, height: 1.6,
-    damage: 3, attackRange: 1.7, dimensions: ['nether'], flying: true,
+    damage: 3, attackRange: 1.7, dimensions: ['nether'], flying: true, weapon: 'staff',
     drops: [{ id: 426, min: 1, max: 2 }],
   },
   nether_pig: {
@@ -154,6 +157,7 @@ export const MOBS = Object.freeze({
       { id: 427, min: 1, max: 3 },
       { id: 405, min: 3, max: 6 },
       { id: 440, min: 2, max: 4 },
+      { id: 475, min: 1, max: 3 },
     ],
   },
   fish: {

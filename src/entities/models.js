@@ -286,9 +286,15 @@ const builders = {
     box(head, 0.08, 0.06, 0.02, 0x101010, 0.1, 0.06, -0.23);
     box(head, 0.22, 0.06, 0.02, 0x1a3a2a, 0, -0.12, -0.23);
     group.add(head);
-    box(group, 0.16, 0.62, 0.18, 0x2f8f6a, -0.33, 1.18, -0.3);
-    box(group, 0.16, 0.62, 0.18, 0x2f8f6a, 0.33, 1.18, -0.3);
-    return { group, legs, head };
+    const arms = [];
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.position.set(side * 0.33, 1.48, -0.2);
+      box(arm, 0.16, 0.62, 0.18, 0x2f8f6a, 0, -0.31, 0);
+      group.add(arm);
+      arms.push(arm);
+    }
+    return { group, legs, arms, head };
   },
   skeleton() {
     const group = new THREE.Group();
@@ -303,9 +309,15 @@ const builders = {
     box(head, 0.09, 0.09, 0.02, 0x1a1a1a, -0.09, 0.04, -0.19);
     box(head, 0.09, 0.09, 0.02, 0x1a1a1a, 0.09, 0.04, -0.19);
     group.add(head);
-    box(group, 0.08, 0.62, 0.08, 0xd8d8d0, -0.28, 1.12, 0);
-    box(group, 0.08, 0.62, 0.08, 0xd8d8d0, 0.28, 1.12, 0);
-    return { group, legs, head };
+    const arms = [];
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.position.set(side * 0.28, 1.42, 0);
+      box(arm, 0.08, 0.62, 0.08, 0xd8d8d0, 0, -0.31, 0);
+      group.add(arm);
+      arms.push(arm);
+    }
+    return { group, legs, arms, head };
   },
   spider() {
     const group = new THREE.Group();
@@ -466,12 +478,64 @@ const builders = {
   },
 };
 
+/** Weapons carried by hostile mobs. The model keeps a `weapon` pivot for swings. */
+const MOB_WEAPONS = Object.freeze({
+  zombie: 'sword',
+  skeleton: 'bow',
+  spider: 'fangs',
+  wolf: 'fangs',
+  enderman: 'claws',
+  blaze: 'staff',
+});
+
+function attachMobWeapon(model, key) {
+  const kind = MOB_WEAPONS[key];
+  if (!kind) return;
+  const weapon = new THREE.Group();
+  if (kind === 'sword') {
+    box(weapon, 0.08, 0.62, 0.04, 0xd9dde4, 0, 0.28, 0);
+    box(weapon, 0.24, 0.06, 0.06, 0x9a7538, 0, -0.04, 0);
+    box(weapon, 0.07, 0.2, 0.07, 0x5c4124, 0, -0.16, 0);
+    weapon.position.set(0.43, 1.02, -0.3);
+    weapon.rotation.set(-0.4, 0, 0.12);
+  } else if (kind === 'bow') {
+    box(weapon, 0.05, 0.5, 0.05, 0x8a6a3c, -0.1, 0.25, 0);
+    box(weapon, 0.05, 0.5, 0.05, 0x8a6a3c, 0.1, 0.25, 0);
+    box(weapon, 0.24, 0.05, 0.05, 0x8a6a3c, 0, 0.5, 0);
+    box(weapon, 0.015, 0.5, 0.015, 0xe6e6d8, 0, 0.25, 0.03);
+    weapon.position.set(0.38, 0.92, -0.26);
+    weapon.rotation.set(-0.25, 0, 0.1);
+  } else if (kind === 'staff') {
+    box(weapon, 0.07, 0.95, 0.07, 0x5a3f24, 0, 0.35, 0);
+    box(weapon, 0.17, 0.17, 0.17, 0xffb32e, 0, 0.88, 0);
+    weapon.position.set(0.4, 0.95, -0.2);
+    weapon.rotation.set(-0.3, 0, 0.14);
+  } else if (kind === 'claws') {
+    for (let i = -1; i <= 1; i++) {
+      const claw = box(weapon, 0.05, 0.3, 0.05, 0xe4e0f0, i * 0.07, 0.12, 0);
+      claw.rotation.z = i * 0.18;
+    }
+    weapon.position.set(0.34, 1.15, -0.24);
+    weapon.rotation.set(-0.5, 0, 0);
+  } else if (kind === 'fangs') {
+    for (const side of [-1, 1]) {
+      const fang = box(weapon, 0.06, 0.22, 0.06, 0xefe6cf, side * 0.09, 0, 0);
+      fang.rotation.z = side * 0.25;
+    }
+    weapon.position.set(0, 0.62, -0.62);
+  }
+  weapon.userData.restX = weapon.rotation.x;
+  model.group.add(weapon);
+  model.weapon = weapon;
+}
+
 export function buildMobModel(key) {
   // Blender GLB first; procedural boxes stay as the fallback.
   const model = createMobModel(key) ?? (builders[key] ?? builders.pig)();
   // Aquatic mobs are tiny; a slight scale boost keeps them readable in water.
   if (key === 'fish') model.group.scale.setScalar(1.3);
   if (key === 'axolotl') model.group.scale.setScalar(1.15);
+  attachMobWeapon(model, key);
   return model;
 }
 

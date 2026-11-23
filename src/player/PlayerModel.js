@@ -55,6 +55,8 @@ const ARMOR_COLORS = {
   leather: 0x8a5a2c,
   iron: 0xc2c7cf,
   diamond: 0x2fd0bf,
+  gold: 0xe5b93f,
+  netherite: 0x5b5368,
 };
 
 /**

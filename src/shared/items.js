@@ -46,6 +46,11 @@ export const ITEM_IDS = Object.freeze({
   SLIME_BALL: 448,
   REDSTONE: 449,
   RAW_FISH: 473,
+  NETHERITE_INGOT: 474,
+  ENDER_SCALE: 475,
+  SPIDER_FANG: 476,
+  WOLF_FUR: 477,
+  CAMEL_HIDE: 478,
   LEATHER_HELMET: 500,
   LEATHER_CHESTPLATE: 501,
   LEATHER_LEGGINGS: 502,
@@ -65,6 +70,9 @@ const TOOL_MATERIALS = [
   { key: 'stone', name: 'Каменный', tier: 2, speed: 4, durability: 132, prefix: 'Каменная' },
   { key: 'iron', name: 'Железный', tier: 3, speed: 6, durability: 250, prefix: 'Железная' },
   { key: 'diamond', name: 'Алмазный', tier: 4, speed: 8, durability: 1562, prefix: 'Алмазная' },
+  // Appended so all existing tool IDs keep their saved values.
+  { key: 'gold', name: 'Золотой', tier: 2, speed: 9, durability: 80, prefix: 'Золотая' },
+  { key: 'netherite', name: 'Незеритовый', tier: 5, speed: 10, durability: 2400, prefix: 'Незеритовая' },
 ];
 
 const TOOL_TYPES = [
@@ -107,6 +115,14 @@ const ARMOR_MATERIALS = [
   {
     key: 'diamond', name: 'Алмазный', base: 508,
     defense: [3, 8, 6, 3], durability: [363, 528, 495, 429],
+  },
+  {
+    key: 'gold', name: 'Золотой', base: 512,
+    defense: [2, 5, 3, 1], durability: [80, 120, 110, 90],
+  },
+  {
+    key: 'netherite', name: 'Незеритовый', base: 516,
+    defense: [4, 9, 7, 4], durability: [520, 760, 700, 600],
   },
 ];
 
@@ -191,6 +207,11 @@ const materialDefs = [
   { id: 448, key: 'slime_ball', name: 'Слизевый шарик', stack: 64, icon: 'slime_ball' },
   { id: 449, key: 'redstone', name: 'Redstone', stack: 64, icon: 'redstone' },
   { id: 473, key: 'raw_fish', name: 'Сырая рыба', stack: 64, icon: 'fish', food: { nutrition: 2, saturation: 1.2 } },
+  { id: 474, key: 'netherite_ingot', name: 'Незеритовый слиток', stack: 64, icon: 'netherite_ingot' },
+  { id: 475, key: 'ender_scale', name: 'Чешуя Края', stack: 16, icon: 'ender_scale' },
+  { id: 476, key: 'spider_fang', name: 'Клык паука', stack: 64, icon: 'spider_fang' },
+  { id: 477, key: 'wolf_fur', name: 'Волчья шерсть', stack: 64, icon: 'wolf_fur' },
+  { id: 478, key: 'camel_hide', name: 'Верблюжья кожа', stack: 64, icon: 'camel_hide' },
 ];
 
 /** One egg per creature. Killing any mob drops the egg that summons it again. */

@@ -1061,6 +1061,8 @@ function makeItemIconCanvas(item) {
       stone: ['#6f6f6f', '#a3a3a3'],
       iron: ['#b7b7bd', '#e8e8ee'],
       diamond: ['#2ab8ad', '#7df5e9'],
+      gold: ['#d9a928', '#ffe785'],
+      netherite: ['#3b3743', '#8a8298'],
     }[material];
     drawHandle();
     if (key === 'pickaxe') {
@@ -1177,6 +1179,8 @@ function drawExtraItemIcon(ctx, key, item = null) {
     leather: ['#8a5a2c', '#b07a42', '#5c3a1a'],
     iron: ['#9c9ca5', '#e8e8ee', '#6f6f78'],
     diamond: ['#2ab8ad', '#7df5e9', '#1a7d75'],
+    gold: ['#d9a928', '#ffe785', '#8f6914'],
+    netherite: ['#3b3743', '#8a8298', '#211e27'],
   }[item?.iconMaterial] ?? ['#9c9ca5', '#e8e8ee', '#6f6f78'];
   if (key === 'helmet') {
     const [base, light, dark] = armorColors;
@@ -1403,6 +1407,36 @@ function drawExtraItemIcon(ctx, key, item = null) {
       }
     }
     setIconPixel(ctx, 6, 7, '#d8f5b0');
+  } else if (key === 'netherite_ingot') {
+    for (let y = 6; y < 12; y++) {
+      for (let x = 3; x < 13; x++) {
+        if (x + y < 12 || x - y > 3) continue;
+        setIconPixel(ctx, x, y, y < 9 ? '#6a6275' : '#332f3b');
+      }
+    }
+    setIconPixel(ctx, 5, 8, '#a99db8');
+  } else if (key === 'ender_scale') {
+    for (let y = 3; y < 13; y++) {
+      const w = Math.max(1, 6 - Math.abs(y - 8));
+      for (let x = 8 - w; x <= 7 + w; x++) {
+        setIconPixel(ctx, x, y, (x + y) % 3 === 0 ? '#b78cff' : '#54308c');
+      }
+    }
+  } else if (key === 'spider_fang') {
+    for (let y = 3; y < 13; y++) {
+      const w = Math.max(1, 5 - Math.floor((y - 3) / 2));
+      for (let x = 8 - w; x <= 7 + w; x++) setIconPixel(ctx, x, y, y < 8 ? '#e6e1d0' : '#a89c7d');
+    }
+  } else if (key === 'wolf_fur') {
+    rect(4, 4, 8, 8, '#a9a49a');
+    rect(3, 6, 10, 4, '#d2cdc2');
+    setIconPixel(ctx, 6, 6, '#625e58');
+    setIconPixel(ctx, 10, 9, '#625e58');
+  } else if (key === 'camel_hide') {
+    rect(3, 4, 10, 8, '#c49a63');
+    rect(4, 5, 8, 3, '#e0bc86');
+    setIconPixel(ctx, 5, 10, '#8a663a');
+    setIconPixel(ctx, 10, 10, '#8a663a');
   }
 }
 
