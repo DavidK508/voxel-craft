@@ -108,6 +108,7 @@ export class WorldGenerator {
     this.noise = new NoiseField(this.seed);
     this.heightCache = new Map();
     this.biomeCache = new Map();
+    this.riverCache = new Map();
     this.villageCells = new Map();
   }
 
@@ -120,6 +121,13 @@ export class WorldGenerator {
   }
 
   riverStrengthAt(x, z) {
+    // heightAt() samples this field five times per column (centre + four
+    // bank neighbours), so caching the noise avoids a large share of world
+    // generation work without changing the output.
+    const key = `${x},${z}`;
+    const cached = this.riverCache.get(key);
+    if (cached !== undefined) return cached;
+
     // Low-frequency domain warp makes winding valleys instead of straight
     // noise contours; several basins keep different regions from repeating.
     const warpX = this.noise.terrain.fbm2(x * 0.00042 - 13.7, z * 0.00042 + 8.2, 3, 2, 0.5) * 180;
@@ -129,7 +137,10 @@ export class WorldGenerator {
     const n = this.noise.river.fbm2(wx * 0.00135 + 73.4, wz * 0.00135 - 19.6, 4, 2.05, 0.5);
     const wiggle = this.noise.erosion.noise2(wx * 0.005 + 11.1, wz * 0.005 - 7.4) * 0.014;
     const width = 0.030 + Math.max(0, this.noise.erosion.noise2(wx * 0.0006, wz * 0.0006)) * 0.012;
-    return 1 - smoothstep(0, width, Math.abs(n + wiggle));
+    const value = 1 - smoothstep(0, width, Math.abs(n + wiggle));
+    if (this.riverCache.size > 12000) this.riverCache.clear();
+    this.riverCache.set(key, value);
+    return value;
   }
 
   /** Shallow lake basins in flat lowlands; kept away from ocean coastlines. */

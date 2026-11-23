@@ -386,7 +386,7 @@ export class Entity {
       this.airTime += dt;
       this.waterTimer -= dt;
       if (this.waterTimer <= 0) {
-        this.waterTimer = 1;
+        this.waterTimer = 2;
         this.waterTarget = this.findNearbyWater(world, 14);
       }
     }
@@ -437,8 +437,8 @@ export class Entity {
     const bx = Math.floor(this.position.x);
     const bz = Math.floor(this.position.z);
     const fromY = Math.max(SEA_LEVEL + 8, this.position.y + 10);
-    for (let dz = -radius; dz <= radius; dz += 3) {
-      for (let dx = -radius; dx <= radius; dx += 3) {
+    for (let dz = -radius; dz <= radius; dz += 4) {
+      for (let dx = -radius; dx <= radius; dx += 4) {
         const x = bx + dx;
         const z = bz + dz;
         const y = waterSurfaceAt(world, x + 0.5, z + 0.5, fromY, SEA_LEVEL - 22);

@@ -53,6 +53,7 @@ export class HUD {
     this.terrainCanvas.width = TERRAIN_SAMPLE_SIZE;
     this.terrainCanvas.height = TERRAIN_SAMPLE_SIZE;
     this.terrainCtx = this.terrainCanvas.getContext?.('2d') ?? null;
+    this.terrainImage = this.terrainCtx?.createImageData?.(TERRAIN_SAMPLE_SIZE, TERRAIN_SAMPLE_SIZE) ?? null;
 
     this.healthIcons = [];
     this.airIcons = [];
@@ -234,10 +235,9 @@ export class HUD {
     const scale = half / MAP_RADIUS;
     const center = state.position;
     ctx.clearRect(0, 0, size, size);
-    if (state.world && this.terrainCtx) {
-      const image = this.terrainCtx.createImageData(TERRAIN_SAMPLE_SIZE, TERRAIN_SAMPLE_SIZE);
-      image.data.set(sampleTerrain(state.world, center));
-      this.terrainCtx.putImageData(image, 0, 0);
+    if (state.world && this.terrainCtx && this.terrainImage) {
+      this.terrainImage.data.set(sampleTerrain(state.world, center));
+      this.terrainCtx.putImageData(this.terrainImage, 0, 0);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(this.terrainCanvas, 0, 0, size, size);
     } else {

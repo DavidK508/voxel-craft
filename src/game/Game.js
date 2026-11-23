@@ -264,6 +264,7 @@ export class Game {
     this.eatCooldown = 0;
     this.stepAccum = 0;
     this.hudAccum = 0;
+    this.mapAccum = 0;
     this.debugAccum = 0;
     this.autosaveTimer = 0;
     this.lastHealth = 20;
@@ -275,10 +276,20 @@ export class Game {
     this.fpsFrames = 0;
     this.fpsTime = 0;
     // Dynamic resolution: drop the internal render size on slow GPUs instead
-    // of dropping frames. 1 = native, 0.6 = 60% of the window resolution.
+    // of dropping frames. 1 = native, 0.5 = half the window resolution.
     this.renderScale = 1;
     this.renderScaleTimer = 0;
     this.renderScaleCooldown = 0;
+    // SwiftShader/llvmpipe have no real GPU; starting small avoids the first
+    // seconds of stutter while the adaptive scaler would be catching up.
+    const gl = this.renderer.getContext?.();
+    const debugInfo = gl?.getExtension?.('WEBGL_debug_renderer_info');
+    const gpuName = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '';
+    this.softwareRenderer = /swiftshader|llvmpipe|software|basic render/i.test(String(gpuName));
+    if (this.softwareRenderer) {
+      this.renderScale = 0.6;
+      this.updateCanvasSize();
+    }
     this.saving = false;
     this.quitting = false;
     this.disposingWorld = false;
@@ -517,18 +528,19 @@ export class Game {
       return;
     }
     this.renderScaleTimer += dt;
-    if (this.renderScaleTimer < 1.2) return;
+    if (this.renderScaleTimer < 0.8) return;
     this.renderScaleTimer = 0;
 
+    const maxScale = this.softwareRenderer ? 0.75 : 1;
     let next = this.renderScale;
-    if (this.fps < 42 && next > 0.6) next = Math.max(0.6, next - 0.1);
-    else if (this.fps > 57 && next < 1) next = Math.min(1, next + 0.05);
+    if (this.fps < 42 && next > 0.5) next = Math.max(0.5, next - 0.15);
+    else if (this.fps > 57 && next < maxScale) next = Math.min(maxScale, next + 0.05);
     if (Math.abs(next - this.renderScale) < 0.001) return;
 
     this.renderScale = next;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2) * next);
     this.renderer.setSize(window.innerWidth, Math.max(1, window.innerHeight), false);
-    this.renderScaleCooldown = 1.5;
+    this.renderScaleCooldown = 1;
   }
 
   loadAppInfo() {
@@ -1788,6 +1800,7 @@ export class Game {
     this.eatCooldown = 0;
     this.stepAccum = 0;
     this.hudAccum = 0;
+    this.mapAccum = 0;
     this.debugAccum = 0;
     this.autosaveTimer = 0;
 
@@ -2075,6 +2088,7 @@ export class Game {
     this.lastHealth = this.player.health;
     this.lastHeldId = null;
     this.hudAccum = 0;
+    this.mapAccum = 0;
     this.debugAccum = 0;
     this.autosaveTimer = 0;
     this.stepAccum = 0;
@@ -3387,6 +3401,7 @@ export class Game {
 
   updateHud(dt, force = false) {
     this.hudAccum += dt;
+    this.mapAccum += dt;
     if (!force && this.hudAccum < 0.1) return;
     this.hudAccum = 0;
     this.hud.updateStats(this.player);
@@ -3395,7 +3410,12 @@ export class Game {
       Math.floor(this.player.position.z),
     ) ?? '—';
     this.hud.updateLocation(biome, this.player.position);
-    this.updateMap();
+    // Terrain sampling is far heavier than the text HUD; 4 Hz is plenty for a
+    // 96x96 overview and cuts canvas uploads on software renderers.
+    if (force || this.mapAccum >= 0.25) {
+      this.mapAccum = 0;
+      this.updateMap();
+    }
     this.hud.setUnderwater(this.player.headInWater);
     const boss = this.entities?.entities.find((entity) => entity.kind === 'boss' && !entity.dead);
     if (boss) this.hud.setBoss(boss);
