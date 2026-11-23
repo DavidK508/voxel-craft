@@ -21,6 +21,15 @@ import {
 } from '../shared/blocks.js';
 import { loadAppearance, saveAppearance } from '../shared/appearance.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
+import {
+  FARMLAND_BLOCK,
+  getNextCropStage,
+  getPlantableCrop,
+  hasWaterNearby,
+  isFarmland,
+  isHoe,
+  isTillable,
+} from '../shared/farming.js';
 import { waterSurfaceAt } from '../shared/water.js';
 import { offersForVillager, performTrade } from '../shared/trades.js';
 import {
@@ -275,6 +284,7 @@ export class Game {
     this.fps = 0;
     this.fpsFrames = 0;
     this.fpsTime = 0;
+    this.farmTimer = 0;
     // Dynamic resolution: drop the internal render size on slow GPUs instead
     // of dropping frames. 1 = native, 0.5 = half the window resolution.
     this.renderScale = 1;
@@ -2355,7 +2365,7 @@ export class Game {
     }
   }
 
-  openInventory(size) {
+  openInventory(size, options = {}) {
     if (this.state !== 'playing' || !this.world || !this.inventory) return;
     this.resetMining();
     this.input.enabled = false;
@@ -2363,7 +2373,7 @@ export class Game {
     this.setState('inventory');
     this.input.exitLock();
     this.inventoryUI.inventory = this.inventory;
-    this.inventoryUI.open(size, { creative: this.isCreative() });
+    this.inventoryUI.open(size, { ...options, creative: this.isCreative() });
   }
 
   closeInventory() {
@@ -2669,6 +2679,7 @@ export class Game {
 
     this.fluids?.update(dt);
     this.redstone?.update(dt);
+    this.updateFarming(dt);
 
     this.entities?.update(dt, this.player, {
       timeOfDay: this.timeOfDay,
@@ -2843,6 +2854,10 @@ export class Game {
         this.openInventory(3);
         return;
       }
+      if (targetBlock.interactive === 'furnace') {
+        this.openInventory(2, { cooking: true });
+        return;
+      }
       if (targetBlock.interactive === 'bed') {
         this.sleepInBed(target);
         return;
@@ -2874,6 +2889,12 @@ export class Game {
     if (!stack) return;
     const item = getItem(stack.id);
     if (!item) return;
+
+    if (item.use === 'cook') {
+      this.openInventory(2, { cooking: true, pan: true });
+      return;
+    }
+    if (this.useFarmingItem(item, target)) return;
 
     if (item.use && this.useSpecialItem(item, target)) return;
 
@@ -3316,6 +3337,79 @@ export class Game {
       return [{ x, y, z, id: getPistonId(yawFacing, false, state.sticky) }];
     }
     return [{ x, y, z, id: blockId }];
+  }
+
+  /** Right-click actions for hoes and seeds. Returns true when handled. */
+  useFarmingItem(item, target) {
+    if (!target) return false;
+    if (isHoe(item.id)) return this.tillSoil(target);
+    const crop = getPlantableCrop(item.id);
+    if (crop) return this.plantSeed(target, crop);
+    return false;
+  }
+
+  tillSoil(target) {
+    const id = this.world.getBlock(target.x, target.y, target.z);
+    if (!isTillable(id)) return false;
+    if (this.player.intersectsBlock(target.x, target.y, target.z)) {
+      this.hud.toast('Здесь стоите вы');
+      return true;
+    }
+    if (!this.setBlockSynced(target.x, target.y, target.z, FARMLAND_BLOCK)) return false;
+    if (!this.isCreative() && this.inventory.damageSelected(1)) {
+      this.hud.toast('Мотыга сломана');
+    }
+    this.audio.playPlace(getBlock(FARMLAND_BLOCK));
+    this.onInventoryChanged();
+    return true;
+  }
+
+  plantSeed(target, crop) {
+    if (!isFarmland(this.world.getBlock(target.x, target.y, target.z))) return false;
+    const x = target.x;
+    const y = target.y + 1;
+    const z = target.z;
+    if (this.world.getBlock(x, y, z) !== 0) return false;
+    if (this.player.intersectsBlock(x, y, z)) {
+      this.hud.toast('Здесь стоите вы');
+      return true;
+    }
+    const stageId = crop.stages[0];
+    if (!this.setBlockSynced(x, y, z, stageId)) return false;
+    if (!this.isCreative()) this.inventory.consumeSelected(1);
+    this.audio.playPlace(getBlock(stageId));
+    this.onInventoryChanged();
+    return true;
+  }
+
+  /** Grows nearby crops every couple of seconds; watered plots grow faster. */
+  updateFarming(dt) {
+    if (!this.player || !this.world) return;
+    this.farmTimer += dt;
+    if (this.farmTimer < 1.5) return;
+    this.farmTimer = 0;
+
+    const px = Math.floor(this.player.position.x);
+    const py = Math.floor(this.player.position.y);
+    const pz = Math.floor(this.player.position.z);
+    const radius = 12;
+    let grown = 0;
+    for (let dz = -radius; dz <= radius && grown < 12; dz++) {
+      for (let dx = -radius; dx <= radius && grown < 12; dx++) {
+        const x = px + dx;
+        const z = pz + dz;
+        for (let y = py - 2; y <= py + 3; y++) {
+          const id = this.world.getBlock(x, y, z);
+          if (!id) continue;
+          const next = getNextCropStage(id);
+          if (next == null) continue;
+          const soilY = y - 1;
+          if (!isFarmland(this.world.getBlock(x, soilY, z))) continue;
+          const chance = hasWaterNearby(this.world, x, soilY, z) ? 0.55 : 0.28;
+          if (Math.random() < chance && this.setBlockSynced(x, y, z, next)) grown++;
+        }
+      }
+    }
   }
 
   placeBlock(target, blockId) {

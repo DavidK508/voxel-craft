@@ -108,6 +108,9 @@ export const TEXTURE_NAMES = [
   'lamp_on',
   'redstone_block',
   'redstone_ore',
+  // Farming update: tilled soil and the golden millet crop.
+  'farmland',
+  'millet_crop',
 ];
 
 export const TILE = Object.freeze(

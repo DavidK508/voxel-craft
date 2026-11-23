@@ -25,7 +25,32 @@ import {
   getWallTorchId,
   isSolid,
 } from '../src/shared/blocks.js';
-import { getItem, getMaxStack, createItemStack, getArmorInfo, getSpawnEggId } from '../src/shared/items.js';
+import {
+  getItem,
+  getMaxStack,
+  createItemStack,
+  getArmorInfo,
+  getSpawnEggId,
+  ITEM_IDS,
+} from '../src/shared/items.js';
+import {
+  COOKING_RECIPES,
+  CookingSession,
+  getCookingRecipe,
+  getFuelSeconds,
+  isFuel,
+} from '../src/shared/cooking.js';
+import {
+  CROPS,
+  FARMLAND_BLOCK,
+  getCropStage,
+  getNextCropStage,
+  getPlantableCrop,
+  hasWaterNearby,
+  isFarmland,
+  isHoe,
+  isTillable,
+} from '../src/shared/farming.js';
 import { isInWater, waterSurfaceAt } from '../src/shared/water.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
 import { findRecipe } from '../src/shared/recipes.js';
@@ -226,7 +251,7 @@ function makeSetWorld(solids) {
 const noInput = { isDown: () => false, isMouseDown: () => false };
 
 await test('block registry is complete and immutable', () => {
-  assert.equal(BLOCK_DEFS.length, 182);
+  assert.equal(BLOCK_DEFS.length, 199);
   assert.equal(getBlock(0).key, 'air');
   assert.equal(getBlock(1).key, 'stone');
   assert.equal(getBlock(999).key, 'air');
@@ -245,6 +270,11 @@ await test('block registry is complete and immutable', () => {
   assert.equal(getBlock(67).key, 'beetroot_crop');
   assert.equal(getBlock(68).key, 'oak_fence');
   assert.equal(getBlock(68).solid, true);
+  assert.equal(getBlock(183).key, 'farmland');
+  assert.equal(getBlock(184).key, 'wheat_crop_young');
+  assert.equal(getBlock(199).key, 'millet_crop');
+  assert.equal(getBlock(199).solid, false);
+  assert.deepEqual(getBlock(199).drops, [{ id: 526, count: 1 }, { id: 525, count: 1 }]);
   assert.equal(getBlock(69).key, 'bed_foot_0');
   assert.equal(getBlock(69).interactive, 'bed');
   assert.equal(getBlock(69).customShape, true);
@@ -328,6 +358,71 @@ await test('extra tool tiers, armor sets and creature materials are registered',
   assert.ok(MOBS.spider.drops.some((drop) => drop.id === 476), 'spiders yield fangs');
   assert.ok(MOBS.ender_dragon.drops.some((drop) => drop.id === 475), 'dragons yield scales');
   assert.ok(MOBS.wolf.drops.some((drop) => drop.id === 477), 'wolves yield fur');
+});
+
+await test('stove toolkit is craftable and registered', () => {
+  assert.equal(getItem(ITEM_IDS.FRYING_PAN).use, 'cook');
+  assert.equal(getItem(ITEM_IDS.WOODEN_HOE).tool.type, 'hoe');
+  assert.equal(createItemStack(ITEM_IDS.IRON_HOE).durability, 250);
+  assert.equal(getItem(ITEM_IDS.COOKED_POTATO).food.nutrition, 6);
+  assert.equal(getCookingRecipe(ITEM_IDS.POTATO).output, ITEM_IDS.COOKED_POTATO);
+  assert.ok(isFuel(ITEM_IDS.COAL));
+  assert.equal(getFuelSeconds(5), 15);
+
+  const pan = findRecipe([403, 403, 403, null, null, 400, null, null, null], 3);
+  assert.equal(pan?.result.id, ITEM_IDS.FRYING_PAN);
+  const hoe = findRecipe([403, 403, null, null, 400, null, null, 400, null], 3);
+  assert.equal(hoe?.result.id, ITEM_IDS.IRON_HOE);
+  assert.ok(COOKING_RECIPES.length >= 10, 'the stove should cook a full recipe book');
+});
+
+await test('stove consumes fuel and turns raw food into cooked food', () => {
+  const session = new CookingSession();
+  session.setSlot(0, { id: ITEM_IDS.POTATO, count: 2 });
+
+  // No fuel means no progress at all.
+  assert.equal(session.tick(5), false);
+  assert.equal(session.progress, 0);
+
+  session.setSlot(1, { id: ITEM_IDS.COAL, count: 1 });
+  session.tick(4);
+  assert.equal(session.fuelRemaining, 76);
+  assert.ok(Math.abs(session.progress - 4 / 7) < 1e-9);
+
+  session.tick(3);
+  assert.equal(session.getSlot(0).count, 1);
+  assert.deepEqual(session.getSlot(2), { id: ITEM_IDS.COOKED_POTATO, count: 1 });
+  assert.ok(session.progress < 1e-9);
+
+  // A blocked output slot must not silently eat the next potato.
+  session.setSlot(0, { id: ITEM_IDS.POTATO, count: 1 });
+  session.setSlot(2, { id: 5, count: 1 });
+  session.tick(7);
+  assert.equal(session.getSlot(2).id, 5);
+  assert.equal(session.getSlot(0).count, 1);
+});
+
+await test('farming registry maps seeds, soil, stages and watering', () => {
+  assert.equal(FARMLAND_BLOCK, 183);
+  assert.ok(isTillable(2));
+  assert.ok(!isTillable(4));
+  assert.ok(isFarmland(FARMLAND_BLOCK));
+  assert.ok(isHoe(ITEM_IDS.IRON_HOE));
+  assert.equal(CROPS.length, 5);
+
+  const potato = getPlantableCrop(ITEM_IDS.POTATO);
+  assert.equal(potato.key, 'potato');
+  assert.deepEqual(potato.stages, [190, 191, 192]);
+  assert.equal(getCropStage(64).stage, 3);
+  assert.equal(getCropStage(200), null);
+  assert.equal(getNextCropStage(190), 191);
+  assert.equal(getNextCropStage(192), 66);
+  assert.equal(getNextCropStage(66), null);
+
+  const wetWorld = { getBlock: (x) => (x === 1 ? 11 : 3) };
+  const dryWorld = { getBlock: () => 3 };
+  assert.ok(hasWaterNearby(wetWorld, 0, 10, 0));
+  assert.ok(!hasWaterNearby(dryWorld, 0, 10, 0));
 });
 
 await test('hostile mobs carry visible weapons', async () => {
@@ -558,9 +653,10 @@ await test('fresh games spawn inside a village with crops and a livestock farm',
       }
     }
   }
-  for (const crop of [64, 65, 66, 67]) {
+  for (const crop of [64, 65, 66, 67, 199]) {
     assert.ok((counts.get(crop) ?? 0) > 5, `village garden should contain crop ${crop}`);
   }
+  assert.ok((counts.get(FARMLAND_BLOCK) ?? 0) > 20, 'village garden should be tilled');
   assert.ok((counts.get(68) ?? 0) > 30, 'village farm should be fenced');
   assert.ok((counts.get(60) ?? 0) > 0, 'village farm should store hay');
 });
@@ -759,7 +855,7 @@ await test('emissive blocks bake block light into the mesh', () => {
 });
 
 await test('decorative blocks use rectangular, non-cube geometry', () => {
-  assert.equal(TEXTURE_COUNT, 107);
+  assert.equal(TEXTURE_COUNT, 109);
   for (const name of ['bed_top', 'bed_side', 'torch_stick', 'torch_flame', 'oak_fence',
     'door_bottom', 'door_top', 'lever_off', 'button_off', 'plate_off', 'wire_off',
     'repeater_off', 'piston_side', 'lamp_off', 'redstone_block', 'redstone_ore']) {

@@ -5,6 +5,24 @@ export const AIR = 0;
 const all = (tile) => [tile, tile, tile, tile, tile, tile];
 const topBottomSide = (top, bottom, side) => [top, bottom, side, side, side, side];
 
+/** Young crop stages share one texture; height is the visible growth cue. */
+const cropStageDef = (id, key, name, tile, stage, seedId, yieldId = null, mature = false) => ({
+  id,
+  key,
+  name,
+  hardness: 0,
+  faceTiles: all(tile),
+  drops: mature
+    ? [{ id: yieldId, count: 1 }, { id: seedId, count: 1 }]
+    : [{ id: seedId, count: 1 }],
+  solid: false,
+  opaque: false,
+  cutout: true,
+  renderLayer: 'cutout',
+  mergeSides: false,
+  crossHeight: [0.3, 0.48, 0.7, 0.92][stage],
+});
+
 // Horizontal facings match the player's yaw: 0 = north (-Z), 1 = east (+X),
 // 2 = south (+Z), 3 = west (-X). Pistons additionally use 4 = down, 5 = up.
 export const HORIZONTAL_OFFSETS = Object.freeze([
@@ -157,7 +175,7 @@ const defs = [
   {
     id: 2, key: 'grass_block', name: 'Травяной блок', hardness: 0.6, tool: 'shovel',
     faceTiles: topBottomSide(TILE.grass_top, TILE.dirt, TILE.grass_side),
-    drops: [{ id: 3, count: 1 }], mergeSides: false,
+    drops: [{ id: 3, count: 1 }, { id: 533, count: 1, chance: 0.25 }], mergeSides: false,
   },
   {
     id: 3, key: 'dirt', name: 'Земля', hardness: 0.5, tool: 'shovel',
@@ -431,25 +449,25 @@ const defs = [
   },
   {
     id: 64, key: 'wheat_crop', name: 'Пшеница', hardness: 0,
-    faceTiles: all(TILE.wheat_crop), drops: [{ id: 441, count: 1 }],
+    faceTiles: all(TILE.wheat_crop), drops: [{ id: 441, count: 1 }, { id: 533, count: 1 }],
     solid: false, opaque: false, cutout: true,
     renderLayer: 'cutout', mergeSides: false, crossHeight: 0.9,
   },
   {
     id: 65, key: 'carrot_crop', name: 'Морковь', hardness: 0,
-    faceTiles: all(TILE.carrot_crop), drops: [{ id: 445, count: 1 }],
+    faceTiles: all(TILE.carrot_crop), drops: [{ id: 445, count: 2 }],
     solid: false, opaque: false, cutout: true,
     renderLayer: 'cutout', mergeSides: false, crossHeight: 0.9,
   },
   {
     id: 66, key: 'potato_crop', name: 'Картофель', hardness: 0,
-    faceTiles: all(TILE.potato_crop), drops: [{ id: 446, count: 1 }],
+    faceTiles: all(TILE.potato_crop), drops: [{ id: 446, count: 2 }],
     solid: false, opaque: false, cutout: true,
     renderLayer: 'cutout', mergeSides: false, crossHeight: 0.9,
   },
   {
     id: 67, key: 'beetroot_crop', name: 'Свёкла', hardness: 0,
-    faceTiles: all(TILE.beetroot_crop), drops: [{ id: 447, count: 1 }],
+    faceTiles: all(TILE.beetroot_crop), drops: [{ id: 447, count: 2 }],
     solid: false, opaque: false, cutout: true,
     renderLayer: 'cutout', mergeSides: false, crossHeight: 0.9,
   },
@@ -460,6 +478,30 @@ const defs = [
     mergeSides: false, crossHeight: 1,
     customShape: true,
   },
+
+  // --- Farming update -------------------------------------------------------
+  // New ids sit above the old redstone states so existing worlds stay valid.
+  {
+    id: 183, key: 'farmland', name: 'Пашня', hardness: 0.5, tool: 'shovel',
+    faceTiles: topBottomSide(TILE.farmland, TILE.dirt, TILE.dirt),
+    drops: [{ id: 3, count: 1 }], mergeSides: false,
+  },
+  cropStageDef(184, 'wheat_crop_young', 'Пшеница (всходы)', TILE.wheat_crop, 0, 533),
+  cropStageDef(185, 'wheat_crop_growing', 'Пшеница (рост)', TILE.wheat_crop, 1, 533),
+  cropStageDef(186, 'wheat_crop_ripe', 'Пшеница (почти спелая)', TILE.wheat_crop, 2, 533),
+  cropStageDef(187, 'carrot_crop_young', 'Морковь (всходы)', TILE.carrot_crop, 0, 445),
+  cropStageDef(188, 'carrot_crop_growing', 'Морковь (рост)', TILE.carrot_crop, 1, 445),
+  cropStageDef(189, 'carrot_crop_ripe', 'Морковь (почти спелая)', TILE.carrot_crop, 2, 445),
+  cropStageDef(190, 'potato_crop_young', 'Картофель (всходы)', TILE.potato_crop, 0, 446),
+  cropStageDef(191, 'potato_crop_growing', 'Картофель (рост)', TILE.potato_crop, 1, 446),
+  cropStageDef(192, 'potato_crop_ripe', 'Картофель (почти спелый)', TILE.potato_crop, 2, 446),
+  cropStageDef(193, 'beetroot_crop_young', 'Свёкла (всходы)', TILE.beetroot_crop, 0, 447),
+  cropStageDef(194, 'beetroot_crop_growing', 'Свёкла (рост)', TILE.beetroot_crop, 1, 447),
+  cropStageDef(195, 'beetroot_crop_ripe', 'Свёкла (почти спелая)', TILE.beetroot_crop, 2, 447),
+  cropStageDef(196, 'millet_crop_young', 'Пшено (всходы)', TILE.millet_crop, 0, 525),
+  cropStageDef(197, 'millet_crop_growing', 'Пшено (рост)', TILE.millet_crop, 1, 525),
+  cropStageDef(198, 'millet_crop_ripe', 'Пшено (почти спелое)', TILE.millet_crop, 2, 525),
+  cropStageDef(199, 'millet_crop', 'Пшено', TILE.millet_crop, 3, 525, 526, true),
 ];
 
 // Multi-block and powered states are encoded directly in the block id, so the

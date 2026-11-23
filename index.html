@@ -261,10 +261,31 @@
         </div>
         <div class="inventory-body">
           <div id="character-preview" class="character-preview" title="Ваш персонаж и надет броня"></div>
-          <div class="crafting-area">
+          <div id="crafting-area" class="crafting-area">
             <div id="crafting-grid" class="crafting-grid"></div>
             <div class="craft-arrow">➜</div>
             <div id="craft-result-slot" class="slot result-slot" data-craft-result="true"></div>
+          </div>
+          <div id="cooking-area" class="cooking-area hidden">
+            <div class="cooking-slots">
+              <div class="cooking-slot-label">Продукт</div>
+              <div id="cooking-input-slot" class="slot"></div>
+              <div class="cook-arrow">➜</div>
+              <div id="cooking-output-slot" class="slot result-slot"></div>
+              <div class="cooking-slot-label">Топливо</div>
+              <div id="cooking-fuel-slot" class="slot"></div>
+            </div>
+            <div class="cooking-meters">
+              <div class="cooking-meter">
+                <span>Готовка</span>
+                <div class="meter-track"><i id="cooking-progress-fill"></i></div>
+              </div>
+              <div class="cooking-meter">
+                <span>Топливо</span>
+                <div class="meter-track fuel"><i id="cooking-fuel-fill"></i></div>
+              </div>
+            </div>
+            <div id="cooking-status" class="cooking-status">Положите еду и топливо</div>
           </div>
           <div class="inventory-main">
             <div class="armor-row">
@@ -281,12 +302,19 @@
           </div>
           <div id="creative-grid" class="creative-grid"></div>
         </div>
-        <div class="recipe-book">
+        <div id="crafting-book" class="recipe-book">
           <div class="recipe-book-head">
             <h3>Рецепты</h3>
             <span id="recipe-hint">Нажми на рецепт — ингредиенты разложатся в сетку</span>
           </div>
           <div id="recipe-list" class="recipe-list"></div>
+        </div>
+        <div id="cooking-book" class="recipe-book cooking-book hidden">
+          <div class="recipe-book-head">
+            <h3>Что можно пожарить</h3>
+            <span>Нажми на блюдо — продукт и топливо добавятся автоматически</span>
+          </div>
+          <div id="cooking-recipe-list" class="recipe-list"></div>
         </div>
         <div class="inventory-hotbar">
           <div id="inventory-hotbar" class="inventory-grid hotbar-grid"></div>

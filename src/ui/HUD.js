@@ -1,4 +1,5 @@
 import { getItem, getToolInfo } from '../shared/items.js';
+import { getPlantableCrop, isHoe } from '../shared/farming.js';
 import {
   MAP_RADIUS,
   MAP_SIZE,
@@ -416,6 +417,20 @@ export class HUD {
   setHeldTool(heldId, creative = false) {
     if (creative) {
       this.setHint('Креатив · ЛКМ — мгновенно ломать · ПКМ — ставить · двойной Space — полёт · E — каталог');
+      return;
+    }
+    const held = getItem(heldId);
+    if (held?.use === 'cook') {
+      this.setHint('ПКМ — открыть сковороду и готовить · E — инвентарь');
+      return;
+    }
+    if (isHoe(heldId)) {
+      this.setHint('ПКМ — вспахать землю · семена сажаются на пашню · E — инвентарь');
+      return;
+    }
+    const crop = getPlantableCrop(heldId);
+    if (crop) {
+      this.setHint(`ПКМ — посадить ${crop.name.toLowerCase()} на пашню · E — инвентарь`);
       return;
     }
     const tool = getToolInfo(heldId);

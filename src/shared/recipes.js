@@ -1,3 +1,5 @@
+import { ITEM_IDS } from './items.js';
+
 const WOOD = [5];
 const STONE = [4];
 const IRON = [403];
@@ -24,6 +26,13 @@ for (const set of materialSets) {
     { id: `${set.key}_sword`, pattern: ['M', 'M', 'S'], key: { M: set.material, S: 400 }, result: { id: set.sword, count: 1 } },
   );
 }
+
+const hoeRecipes = [
+  { id: 'wooden_hoe', pattern: ['MM', ' S', ' S'], key: { M: 5, S: 400 }, result: { id: ITEM_IDS.WOODEN_HOE, count: 1 } },
+  { id: 'stone_hoe', pattern: ['MM', ' S', ' S'], key: { M: 4, S: 400 }, result: { id: ITEM_IDS.STONE_HOE, count: 1 } },
+  { id: 'iron_hoe', pattern: ['MM', ' S', ' S'], key: { M: 403, S: 400 }, result: { id: ITEM_IDS.IRON_HOE, count: 1 } },
+  { id: 'diamond_hoe', pattern: ['MM', ' S', ' S'], key: { M: 405, S: 400 }, result: { id: ITEM_IDS.DIAMOND_HOE, count: 1 } },
+];
 
 const armorRecipes = [];
 const armorSets = [
@@ -68,6 +77,9 @@ export const RECIPES = Object.freeze([
   { id: 'shears', pattern: [' I', 'I '], key: { I: 403 }, result: { id: 418, count: 1 } },
   { id: 'saddle', pattern: ['LLL', 'LSL'], key: { L: 420, S: 423 }, result: { id: 419, count: 1 } },
   { id: 'bread', pattern: ['WWW'], key: { W: 441 }, result: { id: 442, count: 1 } },
+  // Stove toolkit: a pan for portable cooking and hoes for tilling soil.
+  { id: 'frying_pan', pattern: ['III', '  S'], key: { I: 403, S: 400 }, result: { id: ITEM_IDS.FRYING_PAN, count: 1 } },
+  { id: 'wheat_seeds', shapeless: [{ any: [441] }], result: { id: ITEM_IDS.WHEAT_SEEDS, count: 2 } },
   { id: 'eye_of_ender', shapeless: [{ any: [425] }, { any: [426] }], result: { id: 427, count: 1 } },
   { id: 'horse_armor', pattern: ['L L', 'LLL', 'LLL'], key: { L: 420 }, result: { id: 444, count: 1 } },
   { id: 'string_from_wool', shapeless: [{ any: [42] }], result: { id: 423, count: 4 } },
@@ -87,6 +99,7 @@ export const RECIPES = Object.freeze([
   { id: 'sticky_piston', shapeless: [{ any: [151] }, { any: [448] }], result: { id: 169, count: 1 } },
   ...armorRecipes,
   ...toolRecipes,
+  ...hoeRecipes,
 ]);
 
 function normalizeIngredient(ingredient) {

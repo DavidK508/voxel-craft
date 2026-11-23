@@ -1,4 +1,12 @@
 import { RECIPES, findRecipe, recipeToPlacement } from '../shared/recipes.js';
+import {
+  COOKING_RECIPES,
+  COOKING_SLOTS,
+  CookingSession,
+  getCookingRecipe,
+  getFuelSeconds,
+  preferredFuel,
+} from '../shared/cooking.js';
 import { CharacterPreview } from './CharacterPreview.js';
 import {
   ITEM_LIST,
@@ -57,6 +65,22 @@ export class InventoryUI {
     this.creativeGridEl = $('creative-grid');
     this.creativeHintEl = $('creative-hint');
 
+    this.craftingAreaEl = $('crafting-area');
+    this.craftingBookEl = $('crafting-book');
+    this.cookingAreaEl = $('cooking-area');
+    this.cookingBookEl = $('cooking-book');
+    this.cookingInputEl = $('cooking-input-slot');
+    this.cookingFuelEl = $('cooking-fuel-slot');
+    this.cookingOutputEl = $('cooking-output-slot');
+    this.cookingProgressEl = $('cooking-progress-fill');
+    this.cookingFuelFillEl = $('cooking-fuel-fill');
+    this.cookingStatusEl = $('cooking-status');
+    this.cookingRecipeListEl = $('cooking-recipe-list');
+
+    this.cooking = new CookingSession();
+    this.cookingMode = false;
+    this.cookingCards = new Map();
+
     this.views = new Map();
     this.recipeCards = new Map();
     this.craftingSize = 2;
@@ -99,6 +123,13 @@ export class InventoryUI {
       this.armorSlotsEl?.appendChild(element);
       this.views.set(`armor:${i}`, this.decorateSlot(element));
     }
+    const cookingSlots = [this.cookingInputEl, this.cookingFuelEl, this.cookingOutputEl];
+    cookingSlots.forEach((element, index) => {
+      if (!element) return;
+      element.dataset.kind = 'cook';
+      element.dataset.index = String(index);
+      this.views.set(`cook:${index}`, this.decorateSlot(element));
+    });
     this.resultEl.dataset.kind = 'result';
     this.resultEl.dataset.index = '0';
     this.resultView = this.decorateSlot(this.resultEl);
@@ -176,6 +207,14 @@ export class InventoryUI {
       if (!slot) return;
       event.preventDefault();
       this.giveCreativeItem(Number(slot.dataset.itemId), event.button);
+    });
+
+    this.cookingRecipeListEl?.addEventListener('click', (event) => {
+      const card = event.target.closest?.('.cooking-card');
+      if (!card) return;
+      event.preventDefault();
+      const recipe = this.cookingCards.get(card.dataset.cookingId);
+      if (recipe) this.applyCookingRecipe(recipe);
     });
   }
 
@@ -270,6 +309,70 @@ export class InventoryUI {
         ? `${visible} рецептов · нажми, чтобы разложить`
         : 'Открой верстак, чтобы увидеть рецепты 3×3';
     }
+  }
+
+  buildCookingRecipeList() {
+    if (!this.cookingRecipeListEl) return;
+    this.cookingRecipeListEl.replaceChildren();
+    this.cookingCards.clear();
+    for (const recipe of COOKING_RECIPES) {
+      const card = this.createCookingCard(recipe);
+      this.cookingRecipeListEl.appendChild(card);
+      this.cookingCards.set(recipe.id, recipe);
+    }
+  }
+
+  createCookingCard(recipe) {
+    const element = document.createElement('button');
+    element.type = 'button';
+    element.className = 'recipe-card cooking-card';
+    element.dataset.cookingId = recipe.id;
+
+    const top = document.createElement('div');
+    top.className = 'recipe-card-top';
+
+    const input = document.createElement('div');
+    input.className = 'recipe-cell filled';
+    setBackground(input, this.assets.getIcon(recipe.input));
+
+    const arrow = document.createElement('div');
+    arrow.className = 'recipe-arrow';
+    arrow.textContent = '➜';
+
+    const output = document.createElement('div');
+    output.className = 'recipe-output';
+    setBackground(output, this.assets.getIcon(recipe.output));
+
+    top.append(input, arrow, output);
+
+    const name = document.createElement('div');
+    name.className = 'recipe-name';
+    name.textContent = getItem(recipe.output)?.name ?? recipe.id;
+
+    const need = document.createElement('div');
+    need.className = 'recipe-need';
+    need.textContent = `${getItem(recipe.input)?.name ?? recipe.input} · ${recipe.seconds} сек`;
+    element.title = `Пожарть: ${name.textContent}\n${need.textContent}`;
+
+    element.append(top, name, need);
+    return element;
+  }
+
+  /** Convenience: fill empty stove slots from the inventory in one click. */
+  applyCookingRecipe(recipe) {
+    if (!this.cookingMode) return;
+    if (!this.cooking.getSlot(COOKING_SLOTS.INPUT)
+      && this.takeOneFromInventory(recipe.input)) {
+      this.cooking.setSlot(COOKING_SLOTS.INPUT, { id: recipe.input, count: 1 });
+    }
+    if (!this.cooking.getSlot(COOKING_SLOTS.FUEL)) {
+      const fuelId = preferredFuel(this.inventory);
+      if (fuelId != null && this.takeOneFromInventory(fuelId)) {
+        this.cooking.setSlot(COOKING_SLOTS.FUEL, { id: fuelId, count: 1 });
+      }
+    }
+    this.audio?.playClick();
+    this.refresh();
   }
 
   createRecipeCard(recipe, placement) {
@@ -390,6 +493,15 @@ export class InventoryUI {
     }
   }
 
+  resetCooking() {
+    for (let i = 0; i < 3; i++) {
+      const stack = this.cooking.getSlot(i);
+      if (stack) this.returnStack(stack);
+      this.cooking.setSlot(i, null);
+    }
+    this.cooking.clear();
+  }
+
   returnCraftingGrid() {
     for (let i = 0; i < this.craftingSlots.length; i++) {
       const stack = this.craftingSlots[i];
@@ -480,15 +592,26 @@ export class InventoryUI {
 
   open(size = 2, options = {}) {
     if (this.openState) this.close();
-    this.creative = options.creative === true;
+    this.cookingMode = options.cooking === true;
+    this.creative = options.creative === true && !this.cookingMode;
     this.craftingSize = size === 3 ? 3 : 2;
     this.craftingSlots = new Array(9).fill(null);
     this.cursorStack = null;
     this.lastHoverKey = null;
     this.screen.classList.toggle('creative-mode', this.creative);
+    this.screen.classList.toggle('cooking-mode', this.cookingMode);
     toggleHidden(this.creativePanel, !this.creative);
+    toggleHidden(this.craftingAreaEl, this.cookingMode || this.creative);
+    toggleHidden(this.craftingBookEl, this.cookingMode || this.creative);
+    toggleHidden(this.cookingAreaEl, !this.cookingMode);
+    toggleHidden(this.cookingBookEl, !this.cookingMode);
 
-    if (this.creative) {
+    if (this.cookingMode) {
+      this.titleEl.textContent = options.pan ? 'Сковорода' : 'Печь';
+      this.subtitleEl.textContent = 'Положи продукт и топливо. Готовка идёт, пока это окно открыто.';
+      this.resetCooking();
+      this.buildCookingRecipeList();
+    } else if (this.creative) {
       this.titleEl.textContent = 'Креатив';
       this.subtitleEl.textContent = 'Все блоки и предметы доступны. Нажми на предмет, чтобы добавить его в инвентарь.';
       this.buildCreativeGrid();
@@ -521,9 +644,12 @@ export class InventoryUI {
         this.craftingSlots[i] = null;
       }
     }
+    if (this.cookingMode) this.resetCooking();
     this.openState = false;
     this.creative = false;
+    this.cookingMode = false;
     this.recipe = null;
+    this.screen.classList.remove('cooking-mode');
     this.preview?.stop();
     this.screen.classList.add('hidden');
     this.cursorEl.classList.add('hidden');
@@ -538,6 +664,11 @@ export class InventoryUI {
 
   tickPreview(dt) {
     if (this.openState) this.preview?.tick(dt);
+    if (this.openState && this.cookingMode) {
+      const changed = this.cooking.tick(dt);
+      this.renderCooking();
+      if (changed) this.refresh();
+    }
   }
 
   returnStack(stack) {
@@ -548,6 +679,7 @@ export class InventoryUI {
 
   getStack(kind, index) {
     if (kind === 'craft') return this.craftingSlots[index] ?? null;
+    if (kind === 'cook') return this.cooking.getSlot(index);
     if (kind === 'armor') return this.inventory.armor[index] ?? null;
     return this.inventory.slots[index] ?? null;
   }
@@ -555,6 +687,8 @@ export class InventoryUI {
   setStack(kind, index, stack) {
     if (kind === 'craft') {
       this.craftingSlots[index] = stack;
+    } else if (kind === 'cook') {
+      this.cooking.setSlot(index, stack);
     } else if (kind === 'armor') {
       this.inventory.setArmorSlot(index, stack);
     } else {
@@ -618,6 +752,7 @@ export class InventoryUI {
     }
 
     this.renderSlot(this.resultView, this.getResultStack());
+    if (this.cookingMode) this.renderCooking();
     this.renderCursor();
     this.updateRecipeAvailability();
     this.preview?.setArmor(this.inventory.armor);
@@ -642,6 +777,39 @@ export class InventoryUI {
       view.durabilityFill.style.width = `${ratio * 100}%`;
     } else {
       view.durability.classList.add('hidden');
+    }
+  }
+
+  renderCooking() {
+    if (!this.cookingMode) return;
+    const slots = [
+      [this.cookingInputEl, COOKING_SLOTS.INPUT],
+      [this.cookingFuelEl, COOKING_SLOTS.FUEL],
+      [this.cookingOutputEl, COOKING_SLOTS.OUTPUT],
+    ];
+    for (const [element, index] of slots) {
+      const view = this.views.get(`cook:${index}`);
+      if (view) this.renderSlot(view, this.cooking.getSlot(index));
+    }
+
+    const recipe = getCookingRecipe(this.cooking.getSlot(COOKING_SLOTS.INPUT)?.id);
+    const progress = Math.max(0, Math.min(1, this.cooking.progress));
+    const fuel = this.cooking.fuelTotal > 0
+      ? this.cooking.fuelRemaining / this.cooking.fuelTotal
+      : 0;
+    if (this.cookingProgressEl) this.cookingProgressEl.style.width = `${progress * 100}%`;
+    if (this.cookingFuelFillEl) this.cookingFuelFillEl.style.width = `${fuel * 100}%`;
+
+    let status = 'Положите продукт и топливо';
+    if (recipe && !this.cooking.getSlot(COOKING_SLOTS.FUEL) && fuel <= 0) {
+      status = 'Нужно топливо: уголь, доски, бревно или палка';
+    } else if (recipe && !this.cooking.canStoreOutput(recipe.output)) {
+      status = 'Освободите слот готовки';
+    } else if (recipe) {
+      status = `Жарим: ${getItem(recipe.output)?.name ?? recipe.id}`;
+    }
+    if (this.cookingStatusEl && this.cookingStatusEl.textContent !== status) {
+      this.cookingStatusEl.textContent = status;
     }
   }
 
@@ -705,6 +873,14 @@ export class InventoryUI {
       if (item.food.regeneration) lines.push(`<span>Регенерация +${item.food.regeneration}</span>`);
     } else if (item?.placeBlock) {
       lines.push('<span>Строительный блок</span>');
+    }
+    if (this.cookingMode && kind === 'cook') {
+      if (index === COOKING_SLOTS.INPUT) lines.push('<span>Продукт для жарки</span>');
+      if (index === COOKING_SLOTS.FUEL) {
+        const seconds = getFuelSeconds(stack.id);
+        if (seconds > 0) lines.push(`<span>Топливо · ${seconds} сек за штуку</span>`);
+      }
+      if (index === COOKING_SLOTS.OUTPUT) lines.push('<span>Готовое блюдо</span>');
     }
     if (stack.count > 1) lines.push(`<span>Количество: ${stack.count}</span>`);
     this.tooltipEl.innerHTML = lines.join('');
@@ -810,6 +986,11 @@ export class InventoryUI {
     if (kind === 'craft') {
       const remainder = this.inventory.addStack(stack);
       this.craftingSlots[index] = remainder;
+      return;
+    }
+    if (kind === 'cook') {
+      const remainder = this.inventory.addStack(stack);
+      this.cooking.setSlot(index, remainder);
       return;
     }
 

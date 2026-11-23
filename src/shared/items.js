@@ -45,6 +45,21 @@ export const ITEM_IDS = Object.freeze({
   BEETROOT: 447,
   SLIME_BALL: 448,
   REDSTONE: 449,
+  // Farming, stove and cooked-food items (520+ keeps old save ids intact).
+  WOODEN_HOE: 520,
+  STONE_HOE: 521,
+  IRON_HOE: 522,
+  DIAMOND_HOE: 523,
+  FRYING_PAN: 524,
+  MILLET_SEEDS: 525,
+  MILLET: 526,
+  COOKED_POTATO: 527,
+  COOKED_CARROT: 528,
+  COOKED_BEETROOT: 529,
+  COOKED_MILLET: 530,
+  COOKED_FISH: 531,
+  FRIED_EGG: 532,
+  WHEAT_SEEDS: 533,
   RAW_FISH: 473,
   NETHERITE_INGOT: 474,
   ENDER_SCALE: 475,
@@ -133,6 +148,28 @@ const ARMOR_TYPES = [
   { key: 'boots', suffix: 'ботинки', slot: 'feet' },
 ];
 
+// Hoes use a separate id range so every existing tool keeps its saved value.
+const HOE_MATERIAL_KEYS = ['wood', 'stone', 'iron', 'diamond'];
+const hoeDefs = [];
+let hoeId = 520;
+for (const key of HOE_MATERIAL_KEYS) {
+  const material = TOOL_MATERIALS.find((entry) => entry.key === key);
+  hoeDefs.push({
+    id: hoeId++,
+    key: `${material.key}_hoe`,
+    name: `${material.name} мотыга`,
+    stack: 1,
+    icon: 'hoe',
+    iconMaterial: material.key,
+    tool: {
+      type: 'hoe',
+      tier: material.tier,
+      speed: material.speed,
+      durability: material.durability,
+    },
+  });
+}
+
 const armorDefs = [];
 for (const material of ARMOR_MATERIALS) {
   ARMOR_TYPES.forEach((type, index) => {
@@ -207,6 +244,16 @@ const materialDefs = [
   { id: 448, key: 'slime_ball', name: 'Слизевый шарик', stack: 64, icon: 'slime_ball' },
   { id: 449, key: 'redstone', name: 'Redstone', stack: 64, icon: 'redstone' },
   { id: 473, key: 'raw_fish', name: 'Сырая рыба', stack: 64, icon: 'fish', food: { nutrition: 2, saturation: 1.2 } },
+  { id: 524, key: 'frying_pan', name: 'Сковорода', stack: 1, icon: 'frying_pan', use: 'cook' },
+  { id: 525, key: 'millet_seeds', name: 'Семена пшена', stack: 64, icon: 'millet_seeds' },
+  { id: 526, key: 'millet', name: 'Пшено', stack: 64, icon: 'millet', food: { nutrition: 2, saturation: 0.8 } },
+  { id: 527, key: 'cooked_potato', name: 'Жареный картофель', stack: 64, icon: 'cooked_potato', food: { nutrition: 6, saturation: 7.2 } },
+  { id: 528, key: 'cooked_carrot', name: 'Жареная морковь', stack: 64, icon: 'cooked_carrot', food: { nutrition: 5, saturation: 6 } },
+  { id: 529, key: 'cooked_beetroot', name: 'Жареная свёкла', stack: 64, icon: 'cooked_beetroot', food: { nutrition: 5, saturation: 6 } },
+  { id: 530, key: 'cooked_millet', name: 'Жареное пшено', stack: 64, icon: 'cooked_millet', food: { nutrition: 7, saturation: 8.4 } },
+  { id: 531, key: 'cooked_fish', name: 'Жареная рыба', stack: 64, icon: 'cooked_fish', food: { nutrition: 6, saturation: 7.2 } },
+  { id: 532, key: 'fried_egg', name: 'Яичница', stack: 64, icon: 'fried_egg', food: { nutrition: 5, saturation: 5 } },
+  { id: 533, key: 'wheat_seeds', name: 'Семена пшеницы', stack: 64, icon: 'wheat_seeds' },
   { id: 474, key: 'netherite_ingot', name: 'Незеритовый слиток', stack: 64, icon: 'netherite_ingot' },
   { id: 475, key: 'ender_scale', name: 'Чешуя Края', stack: 16, icon: 'ender_scale' },
   { id: 476, key: 'spider_fang', name: 'Клык паука', stack: 64, icon: 'spider_fang' },
@@ -263,6 +310,7 @@ export function getSpawnEggId(type) {
 
 const itemMap = new Map();
 for (const def of toolDefs) itemMap.set(def.id, Object.freeze({ ...def, tool: Object.freeze(def.tool) }));
+for (const def of hoeDefs) itemMap.set(def.id, Object.freeze({ ...def, tool: Object.freeze(def.tool) }));
 for (const def of armorDefs) itemMap.set(def.id, Object.freeze({ ...def, armor: Object.freeze(def.armor) }));
 for (const def of materialDefs) itemMap.set(def.id, Object.freeze({ ...def }));
 

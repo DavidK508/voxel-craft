@@ -93,6 +93,8 @@ const ID = {
   potatoCrop: 66,
   beetrootCrop: 67,
   oakFence: 68,
+  farmland: 183,
+  milletCrop: 199,
   craftingTable: 21,
   furnace: 22,
   glass: 12,
@@ -797,7 +799,7 @@ export class WorldGenerator {
     const x1 = vx + 6;
     const z0 = vz + 14;
     const z1 = vz + 18;
-    const soil = desert ? ID.sand : ID.dirt;
+    const soil = desert ? ID.sand : ID.farmland;
 
     // A low fence around the plot, with a gate facing the village.
     for (let z = z0 - 1; z <= z1 + 1; z++) {
@@ -822,8 +824,9 @@ export class WorldGenerator {
         }
         let crop = ID.wheatCrop;
         if (dx >= -3 && dx <= -1) crop = ID.carrotCrop;
-        else if (dx >= 1 && dx <= 3) crop = ID.potatoCrop;
-        else if (dx >= 4) crop = ID.beetrootCrop;
+        else if (dx >= 1 && dx <= 2) crop = ID.potatoCrop;
+        else if (dx >= 3 && dx <= 4) crop = ID.beetrootCrop;
+        else if (dx >= 5) crop = ID.milletCrop;
         set(x, base + 1, z, crop);
       }
     }

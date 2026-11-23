@@ -1001,6 +1001,31 @@ const PAINTERS = {
     sprinkle(ctx, rng, 16, [206, 42, 42], 255, 2);
     sprinkle(ctx, rng, 8, [255, 96, 88], 255, 1);
   },
+  farmland: (ctx, rng) => {
+    fillNoise(ctx, [92, 62, 34], 12, rng);
+    // Damp furrows make tilled soil read differently from plain dirt.
+    for (let x = 0; x < SIZE; x += 4) {
+      for (let y = 0; y < SIZE; y++) {
+        pixel(ctx, x, y, 58, 38, 22);
+        pixel(ctx, x + 1, y, 74, 48, 26);
+      }
+    }
+    for (let x = 2; x < SIZE; x += 4) {
+      for (let y = 0; y < SIZE; y += 5) pixel(ctx, x, y + (rng() > 0.5 ? 1 : 0), 118, 82, 48);
+    }
+  },
+  millet_crop: (ctx, rng) => {
+    // Tall golden stalks with drooping grain heads.
+    for (const x of [2, 5, 8, 11, 14]) {
+      for (let y = 5; y < 16; y++) pixel(ctx, x, y, 96, 148, 48);
+      for (let y = 2; y < 8; y++) {
+        pixel(ctx, x - 1, y, 226, 190, 72);
+        pixel(ctx, x, y, 250, 218, 104);
+        pixel(ctx, x + 1, y + 1, 198, 158, 52);
+      }
+      if (rng() > 0.5) pixel(ctx, x - 2, 7, 244, 208, 86);
+    }
+  },
 };
 
 function makeCanvas(size = SIZE) {
@@ -1093,6 +1118,14 @@ function makeItemIconCanvas(item) {
         setIconPixel(ctx, 4 + i, 11 - i, colors[0]);
       }
       for (let i = 0; i < 5; i++) setIconPixel(ctx, 2 + i, 10 + (i % 2), '#6b4325');
+    } else if (key === 'hoe') {
+      for (let y = 3; y <= 6; y++) {
+        setIconPixel(ctx, 10, y, colors[0]);
+        setIconPixel(ctx, 11, y, colors[1]);
+      }
+      for (let x = 8; x <= 14; x++) setIconPixel(ctx, x, 3, colors[0]);
+      setIconPixel(ctx, 14, 2, colors[1]);
+      setIconPixel(ctx, 13, 2, colors[1]);
     }
     return canvas;
   }
@@ -1437,6 +1470,49 @@ function drawExtraItemIcon(ctx, key, item = null) {
     rect(4, 5, 8, 3, '#e0bc86');
     setIconPixel(ctx, 5, 10, '#8a663a');
     setIconPixel(ctx, 10, 10, '#8a663a');
+  } else if (key === 'frying_pan') {
+    for (let y = 4; y < 11; y++) {
+      for (let x = 3; x < 12; x++) {
+        const edge = x === 3 || x === 11 || y === 4 || y === 10;
+        setIconPixel(ctx, x, y, edge ? '#3a3b40' : (x + y) % 5 === 0 ? '#5d5f66' : '#25262a');
+      }
+    }
+    for (let i = 0; i < 6; i++) setIconPixel(ctx, 11 + i, 5 + i, '#7a4d2a');
+    setIconPixel(ctx, 12, 6, '#b07a42');
+  } else if (key === 'millet_seeds' || key === 'wheat_seeds') {
+    const color = key === 'millet_seeds' ? '#e6c95e' : '#b8a04a';
+    for (const [x, y] of [[5, 6], [8, 5], [11, 7], [6, 10], [10, 11], [7, 8]]) {
+      setIconPixel(ctx, x, y, color);
+      setIconPixel(ctx, x + 1, y, '#8a722c');
+    }
+  } else if (key === 'millet') {
+    for (let y = 6; y < 12; y++) {
+      for (let x = 4; x < 13; x++) {
+        if ((x + y) % 3 === 0) continue;
+        setIconPixel(ctx, x, y, (x + y) % 2 ? '#f2d66a' : '#c9a83c');
+      }
+    }
+  } else if (key === 'cooked_potato' || key === 'cooked_carrot'
+    || key === 'cooked_beetroot' || key === 'cooked_millet'
+    || key === 'cooked_fish' || key === 'fried_egg') {
+    const palettes = {
+      cooked_potato: ['#d99a4b', '#8c5522', '#f2c779'],
+      cooked_carrot: ['#f08a2c', '#a94d10', '#ffbf63'],
+      cooked_beetroot: ['#a82a4c', '#5c142d', '#d95478'],
+      cooked_millet: ['#e8bf52', '#9c7620', '#ffe08c'],
+      cooked_fish: ['#d29a4a', '#8a5422', '#f3c776'],
+      fried_egg: ['#f4ead0', '#d8b45c', '#fffaf0'],
+    };
+    const [base, dark, light] = palettes[key];
+    for (let y = 5; y < 12; y++) {
+      const w = y < 7 || y > 10 ? 3 : 5;
+      for (let x = 8 - w; x <= 7 + w; x++) {
+        setIconPixel(ctx, x, y, (x + y) % 4 === 0 ? dark : base);
+      }
+    }
+    rect(5, 6, 2, 2, light);
+    rect(10, 8, 2, 2, light);
+    if (key === 'fried_egg') rect(7, 8, 3, 3, '#f2c744');
   }
 }
 
