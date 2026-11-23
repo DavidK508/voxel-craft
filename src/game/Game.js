@@ -280,6 +280,8 @@ export class Game {
     this.renderScale = 1;
     this.renderScaleTimer = 0;
     this.renderScaleCooldown = 0;
+    this.autoDistanceTimer = 0;
+    this.autoDistanceCooldown = 0;
     // SwiftShader/llvmpipe have no real GPU; starting small avoids the first
     // seconds of stutter while the adaptive scaler would be catching up.
     const gl = this.renderer.getContext?.();
@@ -287,7 +289,7 @@ export class Game {
     const gpuName = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '';
     this.softwareRenderer = /swiftshader|llvmpipe|software|basic render/i.test(String(gpuName));
     if (this.softwareRenderer) {
-      this.renderScale = 0.6;
+      this.renderScale = 0.45;
       this.updateCanvasSize();
     }
     this.saving = false;
@@ -523,7 +525,30 @@ export class Game {
    * DOM, not part of the WebGL canvas.
    */
   updateRenderScale(dt) {
-    if (this.state !== 'playing' || this.renderScaleCooldown > 0) {
+    this.autoDistanceCooldown = Math.max(0, this.autoDistanceCooldown - dt);
+    if (this.state !== 'playing') return;
+
+    // Resolution is already at its floor but the frame rate is still bad:
+    // shed a ring of chunks. This helps on real integrated GPUs too, not just
+    // software renderers.
+    const scaleFloor = this.softwareRenderer ? 0.36 : 0.51;
+    if (this.world && this.fps < 24 && this.renderScale <= scaleFloor) {
+      this.autoDistanceTimer += dt;
+      if (this.autoDistanceTimer >= 6 && this.autoDistanceCooldown <= 0
+        && this.world.renderDistance > 3) {
+        this.autoDistanceTimer = 0;
+        this.autoDistanceCooldown = 15;
+        const next = Math.max(3, this.world.renderDistance - 1);
+        this.settings.renderDistance = next;
+        this.world.setRenderDistance(next);
+        this.syncSettingsInputs();
+        this.hud?.toast?.('Дальность снижена для плавности');
+      }
+    } else {
+      this.autoDistanceTimer = 0;
+    }
+
+    if (this.renderScaleCooldown > 0) {
       this.renderScaleCooldown = Math.max(0, this.renderScaleCooldown - dt);
       return;
     }
@@ -531,9 +556,10 @@ export class Game {
     if (this.renderScaleTimer < 0.8) return;
     this.renderScaleTimer = 0;
 
-    const maxScale = this.softwareRenderer ? 0.75 : 1;
+    const minScale = this.softwareRenderer ? 0.35 : 0.5;
+    const maxScale = this.softwareRenderer ? 0.6 : 1;
     let next = this.renderScale;
-    if (this.fps < 42 && next > 0.5) next = Math.max(0.5, next - 0.15);
+    if (this.fps < 42 && next > minScale) next = Math.max(minScale, next - 0.1);
     else if (this.fps > 57 && next < maxScale) next = Math.min(maxScale, next + 0.05);
     if (Math.abs(next - this.renderScale) < 0.001) return;
 
@@ -564,6 +590,11 @@ export class Game {
       raw = null;
     }
     return this.sanitizeSettings(raw, DEFAULT_SETTINGS);
+  }
+
+  /** Software renderers cannot push 11x11 chunks; keep the view compact. */
+  cappedRenderDistance(distance) {
+    return this.softwareRenderer ? Math.min(distance, 3) : distance;
   }
 
   sanitizeSettings(raw, base) {
@@ -597,6 +628,7 @@ export class Game {
   }
 
   applySettings(persist) {
+    this.settings.renderDistance = this.cappedRenderDistance(this.settings.renderDistance);
     this.camera.fov = this.settings.fov;
     this.camera.updateProjectionMatrix();
     this.audio.setVolume(this.settings.volume);
@@ -1818,6 +1850,7 @@ export class Game {
         3,
         MAX_RENDER_DISTANCE,
       );
+      distance = this.cappedRenderDistance(distance);
       this.settings = this.sanitizeSettings(
         { ...this.settings, ...(save.settings ?? {}), renderDistance: distance },
         this.settings,
@@ -1831,6 +1864,7 @@ export class Game {
         3,
         MAX_RENDER_DISTANCE,
       );
+      distance = this.cappedRenderDistance(distance);
       this.settings.renderDistance = distance;
     }
 
