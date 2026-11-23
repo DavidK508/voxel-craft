@@ -24,7 +24,7 @@ import {
   getWallTorchId,
   isSolid,
 } from '../src/shared/blocks.js';
-import { getItem, getMaxStack, createItemStack, getArmorInfo } from '../src/shared/items.js';
+import { getItem, getMaxStack, createItemStack, getArmorInfo, getSpawnEggId } from '../src/shared/items.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
 import { findRecipe } from '../src/shared/recipes.js';
 import { SimplexNoise, NoiseField, mulberry32 } from '../src/shared/noise.js';
@@ -51,6 +51,7 @@ import {
   nearbyVillages,
   BIOME,
   BIOME_INFO,
+  END_ORIGIN,
   NETHER_ORIGIN,
   WorldGenerator,
 } from '../src/world/generator.js';
@@ -171,6 +172,9 @@ function makeFlatWorld(ground = 5) {
     },
     isSolidAt(x, y, z) {
       return y < 0 || y <= ground;
+    },
+    getHeightAt() {
+      return ground;
     },
     isChunkLoadedAt() {
       return true;
@@ -943,15 +947,12 @@ await test('monsters hunt animals and villagers, golems defend them', () => {
   assert.ok(zombieCow.health < zombieHealth, 'golem should protect the animals');
 });
 
-await test('nether portal leads to a hell with pigs and a boss', () => {
+await test('nether portal leads to a hell with pigs', () => {
   assert.equal(MOBS.nether_pig.kind, 'passive');
   assert.ok(MOBS.nether_pig.dimensions.includes('nether'));
   assert.ok(passivePool('nether').some((mob) => mob.key === 'nether_pig'));
   assert.ok(!passivePool('overworld').some((mob) => mob.key === 'nether_pig'));
   assert.ok(!spawnablePassive(BIOME.NETHER).some((mob) => mob.key === 'nether_pig'));
-  assert.equal(MOBS.hell_lord.kind, 'boss');
-  assert.ok(MOBS.hell_lord.health > 200);
-  assert.ok(!HOSTILE_MOBS.some((mob) => mob.key === 'hell_lord'), 'boss must not join random hostile spawns');
 
   const world = { ...makeFlatWorld(39), getHeightAt: () => 39 };
   const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 3 });
@@ -963,16 +964,36 @@ await test('nether portal leads to a hell with pigs and a boss', () => {
   };
   manager.update(0.1, player, { day: false });
   const pigs = manager.entities.filter((entity) => entity.type === 'nether_pig');
-  const boss = manager.entities.find((entity) => entity.kind === 'boss');
   assert.ok(pigs.length >= 3, 'the nether plaza should start with a pig herd');
-  assert.ok(boss, 'the nether plaza should spawn the boss');
+  assert.ok(!manager.entities.some((entity) => entity.kind === 'boss'), 'the Nether no longer hosts the boss');
 });
 
-await test('boss hunts the player, resists blunt weapons and respawns later', () => {
+await test('end portal awakens a flying dragon boss', () => {
+  assert.equal(MOBS.ender_dragon.kind, 'boss');
+  assert.ok(MOBS.ender_dragon.health > 300);
+  assert.ok(MOBS.ender_dragon.dimensions.includes('end'));
+  assert.ok(!HOSTILE_MOBS.some((mob) => mob.key === 'ender_dragon'), 'boss must not join random hostile spawns');
+
+  const world = { ...makeFlatWorld(63), getHeightAt: () => 63 };
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 3 });
+  const player = {
+    position: { x: END_ORIGIN.x + 0.5, y: 65, z: END_ORIGIN.z - 3.5 },
+    creative: false,
+    dead: false,
+    damage() {},
+  };
+  manager.update(0.1, player, { day: true });
+  const boss = manager.entities.find((entity) => entity.kind === 'boss');
+  assert.ok(boss, 'the End plaza should spawn the dragon');
+  assert.equal(boss.type, 'ender_dragon');
+  assert.equal(boss.flying, true);
+});
+
+await test('dragon hunts the player, resists blunt weapons and respawns later', () => {
   const world = makeFlatWorld(5);
   const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 4 });
-  const boss = manager.spawnMob('hell_lord', 0.5, 6.02, 0.5);
-  const pig = manager.spawnMob('nether_pig', 1.6, 6.02, 0.5);
+  const boss = manager.spawnMob('ender_dragon', 0.5, 6.02, 0.5);
+  const cow = manager.spawnMob('cow', 1.6, 6.02, 0.5);
   const player = {
     position: { x: 3.5, y: 6, z: 0.5 },
     creative: false,
@@ -981,7 +1002,7 @@ await test('boss hunts the player, resists blunt weapons and respawns later', ()
   };
   boss.update(1 / 60, world, player, manager);
   assert.equal(boss.huntTarget, player, 'boss must focus on the player');
-  assert.equal(pig.health, pig.maxHealth, 'boss should ignore nearby pigs');
+  assert.equal(cow.health, cow.maxHealth, 'boss should ignore nearby animals');
 
   const beforeAxe = boss.health;
   manager.attack(boss, 10, player, { type: 'axe', tier: 3 });
@@ -993,6 +1014,100 @@ await test('boss hunts the player, resists blunt weapons and respawns later', ()
   manager.attack(boss, 9999, player, { type: 'sword', tier: 3 });
   assert.equal(boss.dead, true);
   assert.ok(manager.bossRespawnAt > manager.time, 'defeated boss gets a respawn delay');
+});
+
+await test('every creature drops a spawn egg that summons it', () => {
+  for (const key of Object.keys(MOBS)) {
+    const id = getSpawnEggId(key);
+    assert.ok(id, `${key} needs a spawn egg`);
+    const item = getItem(id);
+    assert.equal(item.use, 'spawn_egg');
+    assert.equal(item.spawn, key);
+  }
+
+  const eggId = getSpawnEggId('cow');
+  const drops = [];
+  const manager = new EntityManager({
+    scene: { add() {} },
+    world: makeFlatWorld(5),
+    drops: { spawn(...args) { drops.push(args); } },
+    seed: 5,
+  });
+  const cow = manager.spawnMob('cow', 0.5, 6.02, 0.5);
+  manager.attack(cow, 999, { position: { x: 0, y: 6, z: 0 }, creative: false, dead: false });
+  assert.ok(
+    drops.some(([id, count]) => id === eggId && count === 1),
+    'a killed cow must drop exactly one cow egg',
+  );
+});
+
+await test('using a spawn egg summons its creature', async () => {
+  globalThis.location ??= { search: '' };
+  const { Game } = await import('../src/game/Game.js');
+  const item = getItem(getSpawnEggId('cow'));
+  const spawned = [];
+  let consumed = 0;
+  const fakeGame = {
+    world: { ...makeFlatWorld(5), getHeightAt: () => 5 },
+    player: {
+      position: { x: 0, y: 6, z: 0 },
+      getDirection: () => ({ x: 0, y: 0, z: -1 }),
+    },
+    entities: {
+      spawnMob(type, x, y, z, options) {
+        spawned.push({ type, x, y, z, options });
+        return { name: MOBS[type].name };
+      },
+    },
+    isCreative: () => false,
+    inventory: { consumeSelected(count) { consumed += count; } },
+    audio: { playClick() {} },
+    hud: { toast() {} },
+    onInventoryChanged() {},
+  };
+
+  assert.equal(Game.prototype.useSpawnEgg.call(fakeGame, item, null), true);
+  assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].type, 'cow');
+  assert.equal(spawned[0].y, 6.02);
+  assert.equal(consumed, 1);
+});
+
+await test('hostile monsters burn in daylight but not at night, underground or in other dimensions', () => {
+  const drops = [];
+  const manager = new EntityManager({
+    scene: { add() {} },
+    world: makeFlatWorld(5),
+    drops: { spawn(...args) { drops.push(args); } },
+    seed: 6,
+  });
+  const zombie = manager.spawnMob('zombie', 0.5, 6.02, 0.5);
+
+  manager.updateSunlight(zombie, 10, false, 'overworld');
+  assert.equal(zombie.health, zombie.maxHealth, 'no burning at night');
+  manager.updateSunlight(zombie, 10, true, 'nether');
+  assert.equal(zombie.health, zombie.maxHealth, 'no burning outside the overworld');
+
+  manager.updateSunlight(zombie, 4, true, 'overworld');
+  assert.equal(zombie.dead, true, 'an exposed zombie should die in the sun');
+
+  const player = {
+    position: { x: 0, y: 6, z: 0 },
+    creative: false,
+    dead: false,
+    damage() {},
+  };
+  manager.update(1 / 60, player, { day: true });
+  assert.ok(!manager.entities.includes(zombie), 'a burned mob is removed like any other kill');
+  assert.ok(drops.some(([id]) => id === getSpawnEggId('zombie')), 'sunlight kills still drop eggs');
+});
+
+await test('a roof shields monsters from sunlight', () => {
+  const world = makeSetWorld(new Set(['0,9,0']));
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 6 });
+  const zombie = manager.spawnMob('zombie', 0.5, 6.02, 0.5);
+  manager.updateSunlight(zombie, 10, true, 'overworld');
+  assert.equal(zombie.dead, false, 'a solid roof must block the sun');
 });
 
 await test('crafting recipes match shaped and shapeless grids', () => {

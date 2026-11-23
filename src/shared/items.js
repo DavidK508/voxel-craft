@@ -191,6 +191,51 @@ const materialDefs = [
   { id: 449, key: 'redstone', name: 'Redstone', stack: 64, icon: 'redstone' },
 ];
 
+/** One egg per creature. Killing any mob drops the egg that summons it again. */
+const SPAWN_EGG_DEFS = Object.freeze([
+  ['cow', 'Яйцо коровы'],
+  ['pig', 'Яйцо свиньи'],
+  ['sheep', 'Яйцо овцы'],
+  ['chicken', 'Яйцо курицы'],
+  ['rabbit', 'Яйцо кролика'],
+  ['horse', 'Яйцо лошади'],
+  ['camel', 'Яйцо верблюда'],
+  ['wolf', 'Яйцо волка'],
+  ['fox', 'Яйцо лисы'],
+  ['bee', 'Яйцо пчелы'],
+  ['bird', 'Яйцо птицы'],
+  ['villager', 'Яйцо жителя'],
+  ['iron_golem', 'Яйцо железного голема'],
+  ['zombie', 'Яйцо зомби'],
+  ['skeleton', 'Яйцо скелета'],
+  ['spider', 'Яйцо паука'],
+  ['creeper', 'Яйцо крипера'],
+  ['enderman', 'Яйцо странника Края'],
+  ['blaze', 'Яйцо всполоха'],
+  ['nether_pig', 'Яйцо адской свиньи'],
+  ['ender_dragon', 'Яйцо дракона Края'],
+]);
+
+const spawnEggIds = new Map();
+SPAWN_EGG_DEFS.forEach(([spawn, name], index) => {
+  const id = 450 + index;
+  spawnEggIds.set(spawn, id);
+  materialDefs.push({
+    id,
+    key: `spawn_egg_${spawn}`,
+    name,
+    stack: 16,
+    icon: 'egg',
+    use: 'spawn_egg',
+    spawn,
+  });
+});
+
+/** Item id of the egg that summons `type`, or null for unknown creatures. */
+export function getSpawnEggId(type) {
+  return spawnEggIds.get(type) ?? null;
+}
+
 const itemMap = new Map();
 for (const def of toolDefs) itemMap.set(def.id, Object.freeze({ ...def, tool: Object.freeze(def.tool) }));
 for (const def of armorDefs) itemMap.set(def.id, Object.freeze({ ...def, armor: Object.freeze(def.armor) }));

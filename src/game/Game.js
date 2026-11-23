@@ -36,6 +36,7 @@ import {
   isDaytime,
 } from './dayCycle.js';
 import { EntityManager } from '../entities/EntityManager.js';
+import { MOBS } from '../entities/mobs.js';
 import { preloadModels } from '../entities/modelLoader.js';
 import { Inventory } from './Inventory.js';
 import { ItemDrops } from './ItemDrops.js';
@@ -1871,7 +1872,7 @@ export class Game {
         seed: worldSeed,
         audio: this.audio,
       });
-      this.entities.onBossSpawn = (boss) => this.hud.toast(`${boss.name} пробудился в Аду!`, 3200);
+      this.entities.onBossSpawn = (boss) => this.hud.toast(`${boss.name} пробудился в Крае!`, 3200);
       this.entities.onBossDefeat = (boss) => this.hud.toast(`${boss.name} побеждён!`, 3400);
       this.selection = this.createSelectionBox();
 
@@ -2830,8 +2831,12 @@ export class Game {
     }
   }
 
-  /** Handles flint and steel, buckets, saddles, shears and ender eyes. */
+  /** Handles flint and steel, buckets, saddles, shears, eggs and ender eyes. */
   useSpecialItem(item, target) {
+    if (item.use === 'spawn_egg') {
+      return this.useSpawnEgg(item, target);
+    }
+
     if (item.use === 'ignite') {
       return this.ignitePortal(target);
     }
@@ -2888,6 +2893,43 @@ export class Game {
     }
 
     return false;
+  }
+
+  /** Spawns the creature stored in an egg on the first free ground surface. */
+  useSpawnEgg(item, target = null) {
+    const mob = MOBS[item?.spawn];
+    if (!mob || !this.world || !this.entities) return false;
+
+    let x;
+    let z;
+    let surfaceY = null;
+    if (target?.normal?.y === 1 && target.id !== 0) {
+      x = target.x + 0.5;
+      z = target.z + 0.5;
+      surfaceY = target.y;
+      if (this.world.getBlock(target.x, target.y + 1, target.z) !== 0) surfaceY = null;
+    }
+    if (surfaceY === null) {
+      const direction = this.player.getDirection();
+      x = Math.floor(this.player.position.x + direction.x * 2) + 0.5;
+      z = Math.floor(this.player.position.z + direction.z * 2) + 0.5;
+      surfaceY = this.world.getHeightAt?.(Math.floor(x), Math.floor(z));
+    }
+    if (surfaceY == null || !this.world.isChunkLoadedAt?.(x, z)) return false;
+
+    const ground = this.world.getBlock(Math.floor(x), surfaceY, Math.floor(z));
+    if (ground === 0 || ground === 11 || ground === 30 || ground === 55 || ground === 58) return false;
+    if (this.world.getBlock(Math.floor(x), surfaceY + 1, Math.floor(z)) !== 0) return false;
+
+    const entity = this.entities.spawnMob(item.spawn, x, surfaceY + 1.02, z, {
+      home: { x, z },
+    });
+    if (!entity) return false;
+    if (!this.isCreative()) this.inventory.consumeSelected(1);
+    this.audio?.playClick();
+    this.hud?.toast(`${entity.name} призван`);
+    this.onInventoryChanged?.();
+    return true;
   }
 
   findRideable() {
@@ -3338,9 +3380,7 @@ export class Game {
     this.hud.updateLocation(biome, this.player.position);
     this.updateMap();
     this.hud.setUnderwater(this.player.headInWater);
-    const boss = this.dimension === 'nether'
-      ? this.entities?.entities.find((entity) => entity.kind === 'boss' && !entity.dead)
-      : null;
+    const boss = this.entities?.entities.find((entity) => entity.kind === 'boss' && !entity.dead);
     if (boss) this.hud.setBoss(boss);
     else this.hud.clearBoss();
     this.updateDebug();

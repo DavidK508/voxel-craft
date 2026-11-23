@@ -143,17 +143,17 @@ export const MOBS = Object.freeze({
     dimensions: ['nether'], group: [2, 4], spawnWeight: 1,
     drops: [{ id: 430, min: 1, max: 2 }, { id: 426, min: 0, max: 1 }],
   },
-  hell_lord: {
-    key: 'hell_lord', name: 'Адский повелитель', kind: 'boss', model: 'hell_lord',
-    health: 240, speed: 1.65, width: 2.2, height: 3.8,
-    damage: 9, attackRange: 2.8, dimensions: ['nether'],
-    // The lord hoards the Nether's riches; swords are the only reliable way
-    // to cut through its burning hide (see EntityManager.attack).
+  ender_dragon: {
+    key: 'ender_dragon', name: 'Дракон Края', kind: 'boss', model: 'ender_dragon',
+    health: 320, speed: 3.4, width: 2.4, height: 4.2,
+    damage: 12, attackRange: 3.2, dimensions: ['end'], flying: true,
+    // Swords are the only reliable way through the dragon's dense scales
+    // (see EntityManager.attack).
     drops: [
-      { id: 426, min: 4, max: 8 },
-      { id: 404, min: 6, max: 12 },
-      { id: 405, min: 2, max: 4 },
-      { id: 440, min: 1, max: 3 },
+      { id: 425, min: 4, max: 8 },
+      { id: 427, min: 1, max: 3 },
+      { id: 405, min: 3, max: 6 },
+      { id: 440, min: 2, max: 4 },
     ],
   },
 });

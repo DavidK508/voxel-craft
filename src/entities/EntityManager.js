@@ -7,7 +7,9 @@ import {
   rollDrops,
   spawnablePassive,
 } from './mobs.js';
-import { dimensionAt, nearbyVillages, NETHER_ORIGIN } from '../world/generator.js';
+import { dimensionAt, nearbyVillages, END_ORIGIN, NETHER_ORIGIN } from '../world/generator.js';
+import { WORLD_HEIGHT } from '../shared/constants.js';
+import { getSpawnEggId } from '../shared/items.js';
 
 const MAX_ENTITIES = 28;
 const DESPAWN_DISTANCE = 90;
@@ -16,6 +18,7 @@ const SPAWN_MAX = 46;
 const FARM_ANIMALS = ['cow', 'pig', 'sheep', 'chicken'];
 const FARM_ANIMAL_COUNT = 4;
 const BOSS_RESPAWN_SECONDS = 120;
+const SUN_DAMAGE_PER_SECOND = 6;
 
 export class EntityManager {
   constructor({ scene, world, drops, seed, audio = null }) {
@@ -66,6 +69,7 @@ export class EntityManager {
       const tooFar = distance > DESPAWN_DISTANCE
         || (entity.hostile && distance > 72)
         || entityDimension !== dimension;
+      this.updateSunlight(entity, dt, day, dimension);
       if (entity.dead || tooFar) {
         if (entity.dead) {
           if (entity.kind === 'boss') this.registerBossDefeat(entity);
@@ -78,6 +82,7 @@ export class EntityManager {
     }
 
     this.ensureNetherLife(player, dimension);
+    this.ensureEndLife(player, dimension);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
@@ -94,15 +99,36 @@ export class EntityManager {
 
   dropLoot(entity) {
     if (!this.drops) return;
+    const x = entity.position.x;
+    const y = entity.position.y + entity.height * 0.5;
+    const z = entity.position.z;
     for (const stack of rollDrops(entity.mob)) {
-      this.drops.spawn(
-        stack.id,
-        stack.count,
-        entity.position.x,
-        entity.position.y + entity.height * 0.5,
-        entity.position.z,
-      );
+      this.drops.spawn(stack.id, stack.count, x, y, z);
     }
+    // Every creature yields the egg that can summon it again.
+    const eggId = getSpawnEggId(entity.type);
+    if (eggId !== null) this.drops.spawn(eggId, 1, x, y, z);
+  }
+
+  /**
+   * Overworld monsters burn when the sun can actually reach them. Damage is
+   * gradual so the kill still runs through the normal death/loot path.
+   */
+  updateSunlight(entity, dt, day, dimension) {
+    if (!entity.hostile || entity.dead || !day || dimension !== 'overworld') return;
+    if (!this.isSunlit(entity)) return;
+    entity.hit(SUN_DAMAGE_PER_SECOND * dt, null);
+  }
+
+  isSunlit(entity) {
+    if (typeof this.world?.isSolidAt !== 'function') return false;
+    const bx = Math.floor(entity.position.x);
+    const bz = Math.floor(entity.position.z);
+    const startY = Math.ceil(entity.position.y + entity.height);
+    for (let y = startY; y < WORLD_HEIGHT; y++) {
+      if (this.world.isSolidAt(bx, y, bz)) return false;
+    }
+    return true;
   }
 
   removeAt(index) {
@@ -126,10 +152,7 @@ export class EntityManager {
     return { x, y: height + 1.02, z };
   }
 
-  /**
-   * The Nether plaza always has a small herd and, after a defeat, a recovering
-   * boss. This runs every frame but the expensive work is gated by timers.
-   */
+  /** The Nether plaza always has a small herd. */
   ensureNetherLife(player, dimension) {
     if (dimension !== 'nether') return;
     const distance = Math.hypot(
@@ -137,23 +160,33 @@ export class EntityManager {
       player.position.z - NETHER_ORIGIN.z,
     );
     if (distance > 44) return;
-
-    const bossAlive = this.entities.some((entity) => entity.kind === 'boss' && !entity.dead);
-    if (!bossAlive && this.time >= this.bossRespawnAt) this.spawnNetherBoss();
     if (this.time >= this.pigSeedAt) this.seedNetherPigs();
   }
 
-  spawnNetherBoss() {
-    const x = NETHER_ORIGIN.x + 8.5;
-    const z = NETHER_ORIGIN.z - 8.5;
+  /** The End dragon owns the End plaza and returns two minutes after a kill. */
+  ensureEndLife(player, dimension) {
+    if (dimension !== 'end') return;
+    const distance = Math.hypot(
+      player.position.x - END_ORIGIN.x,
+      player.position.z - END_ORIGIN.z,
+    );
+    if (distance > 44) return;
+    const bossAlive = this.entities.some((entity) => entity.kind === 'boss' && !entity.dead);
+    if (!bossAlive && this.time >= this.bossRespawnAt) this.spawnEndBoss();
+  }
+
+  spawnEndBoss() {
+    // Offset from the centre so it does not overlap the return portal or pillars.
+    const x = END_ORIGIN.x + 6.5;
+    const z = END_ORIGIN.z - 5.5;
     if (!this.world.isChunkLoadedAt(x, z)) return;
     const height = this.world.getHeightAt(Math.floor(x), Math.floor(z));
     if (height == null) return;
     const ground = this.world.getBlock(Math.floor(x), height, Math.floor(z));
     const above = this.world.getBlock(Math.floor(x), height + 1, Math.floor(z));
-    if (ground === 0 || ground === 11 || ground === 30 || ground === 55 || above !== 0) return;
-    const boss = this.spawnMob('hell_lord', x, height + 1.02, z, {
-      home: { x: NETHER_ORIGIN.x, z: NETHER_ORIGIN.z },
+    if (ground === 0 || ground === 11 || ground === 30 || ground === 55 || ground === 58 || above !== 0) return;
+    const boss = this.spawnMob('ender_dragon', x, height + 1.02, z, {
+      home: { x: END_ORIGIN.x, z: END_ORIGIN.z },
     });
     if (boss) this.onBossSpawn?.(boss);
   }

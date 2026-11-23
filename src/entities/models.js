@@ -374,43 +374,42 @@ const builders = {
     }
     return { group, legs: [], rods, head: null };
   },
-  hell_lord() {
+  ender_dragon() {
     const group = new THREE.Group();
     const legs = [];
     for (const side of [-1, 1]) {
-      legs.push(leg(group, side * 0.42, 1.15, 0, 0.42, 1.15, 0.5, 0x4a0e12));
+      legs.push(leg(group, side * 0.55, 1.35, 0.35, 0.32, 1.35, 0.38, 0x171326));
+      legs.push(leg(group, side * 0.45, 1.1, -0.85, 0.26, 1.1, 0.3, 0x171326));
     }
-    box(group, 1.7, 1.25, 1.0, 0x7d1a1c, 0, 1.85, 0);
-    box(group, 1.2, 0.45, 0.8, 0x9c2420, 0, 1.3, 0);
-
-    const arms = [];
-    for (const side of [-1, 1]) {
-      const arm = new THREE.Group();
-      arm.position.set(side * 1.05, 2.28, 0);
-      box(arm, 0.42, 1.25, 0.48, 0x6d1518, 0, -0.62, 0);
-      box(arm, 0.5, 0.4, 0.56, 0x9c2420, 0, -1.25, 0);
-      group.add(arm);
-      arms.push(arm);
+    box(group, 1.5, 0.9, 2.6, 0x211a33, 0, 1.9, 0.2);
+    box(group, 1.1, 0.55, 1.2, 0x33254d, 0, 2.25, 0.6);
+    // Segmented tail tapering away behind the body.
+    for (let i = 0; i < 5; i++) {
+      const scale = 1 - i * 0.14;
+      box(group, 0.42 * scale, 0.42 * scale, 0.7, 0x2b2142, 0, 1.85, 1.55 + i * 0.55);
     }
 
     const head = new THREE.Group();
-    head.position.set(0, 2.75, 0);
-    box(head, 0.95, 0.9, 0.9, 0x9c2420);
-    box(head, 0.55, 0.34, 0.3, 0x521014, 0, -0.16, -0.55);
-    box(head, 0.14, 0.11, 0.04, 0xffd257, -0.24, 0.12, -0.47);
-    box(head, 0.14, 0.11, 0.04, 0xffd257, 0.24, 0.12, -0.47);
-    box(head, 0.18, 0.6, 0.18, 0xe8c98a, -0.42, 0.62, 0);
-    box(head, 0.18, 0.6, 0.18, 0xe8c98a, 0.42, 0.62, 0);
-    box(head, 0.9, 0.18, 0.9, 0xf0b429, 0, 0.56, 0);
-    for (let i = -1; i <= 1; i++) {
-      box(head, 0.14, 0.3, 0.14, 0xf0b429, i * 0.3, 0.78, 0);
-    }
+    head.position.set(0, 2.2, -1.55);
+    box(head, 0.8, 0.6, 1.0, 0x2b2142);
+    box(head, 0.55, 0.22, 0.7, 0x171326, 0, -0.1, -0.75);
+    box(head, 0.12, 0.1, 0.04, 0xff4fd8, -0.25, 0.12, -0.52);
+    box(head, 0.12, 0.1, 0.04, 0xff4fd8, 0.25, 0.12, -0.52);
+    box(head, 0.12, 0.5, 0.12, 0x6f4aa8, -0.32, 0.42, 0.1);
+    box(head, 0.12, 0.5, 0.12, 0x6f4aa8, 0.32, 0.42, 0.1);
     group.add(head);
 
-    for (let i = -2; i <= 2; i++) {
-      box(group, 0.16, 0.5, 0.16, 0xff6a1e, i * 0.28, 2.5, 0.45);
+    const wings = [];
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Group();
+      wing.position.set(side * 0.7, 2.35, 0.1);
+      const membrane = box(wing, 2.2, 0.08, 1.5, 0x4b2f75, side * 1.1, 0, 0);
+      membrane.rotation.z = side * 0.12;
+      box(wing, 0.12, 0.12, 1.7, 0x8a5fc0, side * 2.15, 0, 0.1);
+      group.add(wing);
+      wings.push(wing);
     }
-    return { group, legs, arms, head };
+    return { group, legs, wings, head };
   },
 };
 
