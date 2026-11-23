@@ -17,41 +17,20 @@ function clearPixel(ctx, x, y) {
 }
 
 /**
- * Bilinear-interpolated coarse noise field. Keeps the hand-painted colour
- * variation but removes the harsh per-pixel TV-static grain that reads as
- * visual noise on large flat surfaces.
+ * Crisp 2x2-pixel blocky noise. Each 2x2 cell gets one random shade, so the
+ * texture reads as chunky pixel art instead of per-pixel TV static, while
+ * staying sharp (no interpolation / blur).
  */
-function smoothNoiseField(rng, variance, grid = 4) {
-  const cells = [];
-  for (let gy = 0; gy <= grid; gy++) {
-    const row = [];
-    for (let gx = 0; gx <= grid; gx++) row.push((rng() - 0.5) * variance * 2);
-    cells.push(row);
-  }
-  const field = [];
-  for (let y = 0; y < SIZE; y++) {
-    const fy = (y / SIZE) * grid;
-    const y0 = Math.min(grid - 1, Math.floor(fy));
-    const ty = fy - y0;
-    const row = [];
-    for (let x = 0; x < SIZE; x++) {
-      const fx = (x / SIZE) * grid;
-      const x0 = Math.min(grid - 1, Math.floor(fx));
-      const tx = fx - x0;
-      row.push((cells[y0][x0] * (1 - tx) + cells[y0][x0 + 1] * tx) * (1 - ty)
-        + (cells[y0 + 1][x0] * (1 - tx) + cells[y0 + 1][x0 + 1] * tx) * ty);
-    }
-    field.push(row);
-  }
-  return field;
-}
-
 function fillNoise(ctx, base, variance, rng, alpha = 255) {
-  const field = smoothNoiseField(rng, variance);
-  for (let y = 0; y < SIZE; y++) {
-    for (let x = 0; x < SIZE; x++) {
-      const n = field[y][x];
-      pixel(ctx, x, y, base[0] + n, base[1] + n, base[2] + n, alpha);
+  const cell = 2;
+  for (let cy = 0; cy < SIZE; cy += cell) {
+    for (let cx = 0; cx < SIZE; cx += cell) {
+      const n = Math.round((rng() - 0.5) * variance * 2);
+      for (let dy = 0; dy < cell; dy++) {
+        for (let dx = 0; dx < cell; dx++) {
+          pixel(ctx, cx + dx, cy + dy, base[0] + n, base[1] + n, base[2] + n, alpha);
+        }
+      }
     }
   }
 }
@@ -71,8 +50,19 @@ function sprinkle(ctx, rng, count, color, alpha = 255, size = 1) {
 
 function stoneBase(ctx, rng, tint = [122, 122, 122], variance = 24) {
   fillNoise(ctx, tint, variance, rng);
-  sprinkle(ctx, rng, 18, [tint[0] - 22, tint[1] - 22, tint[2] - 22], 255, 2);
+  sprinkle(ctx, rng, 14, [tint[0] - 22, tint[1] - 22, tint[2] - 22], 255, 2);
   sprinkle(ctx, rng, 9, [tint[0] + 22, tint[1] + 22, tint[2] + 22], 255, 1);
+  // Jagged dark cracks so stone reads as rock instead of flat grey noise.
+  for (let i = 0; i < 3; i++) {
+    let x = 1 + Math.floor(rng() * 11);
+    let y = 1 + Math.floor(rng() * 12);
+    const len = 4 + Math.floor(rng() * 4);
+    for (let j = 0; j < len; j++) {
+      pixel(ctx, x, y, tint[0] - 46, tint[1] - 46, tint[2] - 46);
+      x += 1;
+      y += rng() < 0.35 ? 1 : rng() < 0.5 ? -1 : 0;
+    }
+  }
 }
 
 function oreTexture(ctx, rng, oreColor) {
@@ -103,11 +93,17 @@ function cobbleTexture(ctx, rng, mossy = false) {
   ];
   for (const [x, y, w, h] of cells) {
     const shade = 92 + Math.floor(rng() * 35);
-    for (let dy = 0; dy < h; dy++) {
-      for (let dx = 0; dx < w; dx++) {
-        const edge = dx === 0 || dy === 0 ? -18 : 0;
-        const n = (rng() - 0.5) * 10;
-        pixel(ctx, x + dx, y + dy, shade + n + edge, shade + n + edge, shade + n + edge);
+    // One shade per 2x2 sub-cell keeps the cobbles chunky, not grainy.
+    for (let dy = 0; dy < h; dy += 2) {
+      for (let dx = 0; dx < w; dx += 2) {
+        const n = Math.round((rng() - 0.5) * 14);
+        for (let sy = 0; sy < 2 && dy + sy < h; sy++) {
+          for (let sx = 0; sx < 2 && dx + sx < w; sx++) {
+            const edge = dx + sx === 0 || dy + sy === 0 ? -18 : 0;
+            const c = shade + n + edge;
+            pixel(ctx, x + dx + sx, y + dy + sy, c, c, c);
+          }
+        }
       }
     }
   }
@@ -164,15 +160,21 @@ function logTopTexture(ctx, rng, base, ring) {
 }
 
 function leavesTexture(ctx, rng, base, dark) {
-  const field = smoothNoiseField(rng, 14);
+  // 2x2 shade cells keep the canopy chunky; holes and dark clumps stay per-pixel.
+  const shades = [];
+  for (let cy = 0; cy < SIZE; cy += 2) {
+    const row = [];
+    for (let cx = 0; cx < SIZE; cx += 2) row.push(Math.round((rng() - 0.5) * 26));
+    shades.push(row);
+  }
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
-      if (rng() < 0.11) {
+      if (rng() < 0.13) {
         clearPixel(ctx, x, y);
         continue;
       }
-      const n = field[y][x];
-      const d = rng() < 0.24;
+      const n = shades[y >> 1][x >> 1];
+      const d = rng() < 0.26;
       pixel(ctx, x, y,
         (d ? dark[0] : base[0]) + n,
         (d ? dark[1] : base[1]) + n,
@@ -195,13 +197,30 @@ const PAINTERS = {
   stone: (ctx, rng) => stoneBase(ctx, rng),
   dirt: (ctx, rng) => {
     fillNoise(ctx, [133, 96, 67], 22, rng);
-    sprinkle(ctx, rng, 16, [98, 69, 47], 255, 2);
+    // Chunky pebbles: dark 2x2 clumps with a lighter top edge.
+    for (let i = 0; i < 7; i++) {
+      const x = Math.floor(rng() * 14);
+      const y = Math.floor(rng() * 14);
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          pixel(ctx, x + dx, y + dy, dy === 0 ? 116 : 92, dy === 0 ? 83 : 64, dy === 0 ? 58 : 44);
+        }
+      }
+    }
+    sprinkle(ctx, rng, 8, [98, 69, 47], 255, 1);
     sprinkle(ctx, rng, 8, [160, 121, 87], 255, 1);
   },
   grass_top: (ctx, rng) => {
     fillNoise(ctx, [94, 157, 52], 22, rng);
-    sprinkle(ctx, rng, 18, [65, 122, 37], 255, 2);
-    sprinkle(ctx, rng, 7, [126, 185, 72], 255, 1);
+    sprinkle(ctx, rng, 14, [65, 122, 37], 255, 2);
+    // Upright grass blades: short bright strokes with a darker root.
+    for (let i = 0; i < 10; i++) {
+      const x = Math.floor(rng() * 16);
+      const y = 1 + Math.floor(rng() * 12);
+      pixel(ctx, x, y, 132, 196, 78);
+      pixel(ctx, x, y + 1, 110, 176, 62);
+      if (rng() < 0.5) pixel(ctx, x, y + 2, 76, 138, 44);
+    }
   },
   grass_side: (ctx, rng) => {
     fillNoise(ctx, [133, 96, 67], 20, rng);
@@ -211,9 +230,18 @@ const PAINTERS = {
         const n = (rng() - 0.5) * 12;
         pixel(ctx, x, y, 94 + n, 157 + n, 52 + n);
       }
-      if (rng() < 0.3) pixel(ctx, x, depth, 70, 127, 42);
+      // Ragged turf edge with blades hanging into the dirt.
+      if (rng() < 0.45) pixel(ctx, x, depth, 70, 127, 42);
+      if (rng() < 0.2) pixel(ctx, x, depth + 1, 62, 112, 38);
     }
-    sprinkle(ctx, rng, 8, [100, 70, 48], 255, 2);
+    for (let i = 0; i < 5; i++) {
+      const x = Math.floor(rng() * 14);
+      const y = 7 + Math.floor(rng() * 7);
+      pixel(ctx, x, y, 98, 69, 47);
+      pixel(ctx, x + 1, y, 98, 69, 47);
+      pixel(ctx, x, y + 1, 88, 61, 41);
+      pixel(ctx, x + 1, y + 1, 88, 61, 41);
+    }
   },
   snow_side: (ctx, rng) => {
     fillNoise(ctx, [133, 96, 67], 18, rng);
@@ -231,12 +259,29 @@ const PAINTERS = {
     sprinkle(ctx, rng, 6, [255, 255, 255], 255, 1);
   },
   sand: (ctx, rng) => {
-    fillNoise(ctx, [218, 206, 158], 13, rng);
-    sprinkle(ctx, rng, 12, [195, 181, 133], 255, 1);
+    fillNoise(ctx, [218, 206, 158], 16, rng);
+    // Speckled 2x2 dot clusters — sand's signature grain pattern.
+    for (let i = 0; i < 8; i++) {
+      const x = Math.floor(rng() * 14);
+      const y = Math.floor(rng() * 14);
+      pixel(ctx, x, y, 193, 179, 130);
+      pixel(ctx, x + 1, y, 193, 179, 130);
+      pixel(ctx, x, y + 1, 203, 190, 143);
+      pixel(ctx, x + 1, y + 1, 203, 190, 143);
+    }
+    sprinkle(ctx, rng, 8, [236, 227, 184], 255, 1);
   },
   red_sand: (ctx, rng) => {
     fillNoise(ctx, [188, 101, 55], 17, rng);
-    sprinkle(ctx, rng, 12, [157, 78, 41], 255, 1);
+    for (let i = 0; i < 8; i++) {
+      const x = Math.floor(rng() * 14);
+      const y = Math.floor(rng() * 14);
+      pixel(ctx, x, y, 157, 78, 41);
+      pixel(ctx, x + 1, y, 157, 78, 41);
+      pixel(ctx, x, y + 1, 169, 88, 48);
+      pixel(ctx, x + 1, y + 1, 169, 88, 48);
+    }
+    sprinkle(ctx, rng, 6, [214, 128, 78], 255, 1);
   },
   sandstone_top: (ctx, rng) => {
     fillNoise(ctx, [220, 210, 164], 7, rng);
@@ -319,17 +364,24 @@ const PAINTERS = {
   spruce_log_top: (ctx, rng) => logTopTexture(ctx, rng, [110, 84, 52], [68, 50, 30]),
   spruce_leaves: (ctx, rng) => leavesTexture(ctx, rng, [45, 92, 51], [28, 64, 35]),
   water: (ctx, rng) => {
-    // Smooth sine ripples only — no per-pixel random noise, so the scrolling
-    // wave animation stays calm instead of shimmering like static.
-    for (let y = 0; y < SIZE; y++) {
-      for (let x = 0; x < SIZE; x++) {
-        const wave = Math.sin((x + y * 0.8) * 0.9) * 7;
-        pixel(ctx, x, y, 45 + wave, 106 + wave, 191 + wave, 205);
+    // Chunky stepped waves: the sine is quantised into flat bands on a 2x2
+    // grid, so the surface reads as pixel art and scrolls without shimmer.
+    for (let cy = 0; cy < SIZE; cy += 2) {
+      for (let cx = 0; cx < SIZE; cx += 2) {
+        const wave = Math.round(Math.sin((cx + cy * 0.8) * 0.9) * 3) * 4;
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            pixel(ctx, cx + dx, cy + dy, 45 + wave, 106 + wave, 191 + wave, 205);
+          }
+        }
       }
     }
+    // A few bright glints as short 2px dashes.
     for (let i = 0; i < 5; i++) {
-      const y = Math.floor(rng() * 16);
-      for (let x = Math.floor(rng() * 8); x < 16; x += 4) pixel(ctx, x, y, 105, 171, 236, 170);
+      const x = Math.floor(rng() * 7) * 2;
+      const y = Math.floor(rng() * 8) * 2;
+      pixel(ctx, x, y, 105, 171, 236, 185);
+      pixel(ctx, x + 1, y, 105, 171, 236, 185);
     }
   },
   lava: (ctx, rng) => {
