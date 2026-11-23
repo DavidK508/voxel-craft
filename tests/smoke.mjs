@@ -1361,6 +1361,58 @@ await test('fish and axolotl swim, spawn on banks and flop back to water', () =>
   assert.ok(stranded.velocity.x < 0, 'it flops towards the river');
 });
 
+await test('beached aquatic mobs suffocate while fish in water survive', () => {
+  const drops = [];
+  const dryWorld = makeFlatWorld(5);
+  const dry = new EntityManager({
+    scene: { add() {} },
+    world: dryWorld,
+    drops: { spawn(...args) { drops.push(args); } },
+    seed: 9,
+  });
+  const stranded = dry.spawnMob('fish', 2.5, 6.02, 2.5);
+  const player = { position: { x: 4, y: 6, z: 4 }, creative: false, dead: false };
+  for (let i = 0; i < 180; i++) dry.update(1 / 30, player, { day: true });
+  assert.equal(stranded.dead, true, 'a fish stuck on land must die');
+  assert.ok(drops.some(([id]) => id === getSpawnEggId('fish')), 'suffocated fish drop their egg');
+
+  const waterWorld = makeWaterWorld();
+  const wet = new EntityManager({ scene: { add() {} }, world: waterWorld, drops: null, seed: 9 });
+  const swimmer = wet.spawnMob('axolotl', 2.5, SEA_LEVEL, 0.5);
+  for (let i = 0; i < 180; i++) {
+    swimmer.update(1 / 30, waterWorld, player, wet);
+    wet.updateStranding(swimmer, 1 / 30);
+  }
+  assert.equal(swimmer.dead, false, 'aquatic mobs in water stay alive');
+});
+
+await test('aquatic mobs are kept in a visible school near the player', () => {
+  const world = makeWaterWorld();
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 11 });
+  const player = { position: { x: 12, y: SEA_LEVEL, z: 0 }, creative: false, dead: false };
+
+  manager.update(1.1, player, { day: true });
+  const school = manager.entities.filter((entity) => entity.aquatic);
+  assert.ok(school.length >= 2, `expected visible aquatic life, got ${school.length}`);
+  assert.ok(
+    school.every((entity) => entity.position.x >= 0 && entity.position.x <= 9),
+    'the school swims in the nearby river',
+  );
+  assert.ok(
+    school.every((entity) => entity.position.y > SEA_LEVEL - 1 && entity.position.y <= SEA_LEVEL),
+    'the school swims at the water surface where it can be seen',
+  );
+
+  for (let i = 0; i < 4; i++) manager.ensureAquaticLife(player, 'overworld');
+  const count = manager.entities.length;
+  manager.ensureAquaticLife(player, 'overworld');
+  assert.equal(manager.entities.length, count, 'a full school is not endlessly respawned');
+
+  const nether = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 11 });
+  nether.ensureAquaticLife(player, 'nether');
+  assert.equal(nether.entities.length, 0, 'aquatic mobs stay in the overworld');
+});
+
 await test('aquatic spawn eggs place mobs in water or on the bank', async () => {
   globalThis.location ??= { search: '' };
   const { Game } = await import('../src/game/Game.js');

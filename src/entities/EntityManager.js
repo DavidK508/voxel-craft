@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Entity } from './Entity.js';
 import {
-  AQUATIC_MOBS,
   MOBS,
   hostilePool,
   passivePool,
@@ -21,6 +20,9 @@ const FARM_ANIMALS = ['cow', 'pig', 'sheep', 'chicken'];
 const FARM_ANIMAL_COUNT = 4;
 const BOSS_RESPAWN_SECONDS = 120;
 const SUN_DAMAGE_PER_SECOND = 6;
+const STRANDED_GRACE_SECONDS = 2.5;
+const STRANDED_DAMAGE_PER_SECOND = 4;
+const AQUATIC_TARGET = 6;
 
 export class EntityManager {
   constructor({ scene, world, drops, seed, audio = null }) {
@@ -32,6 +34,7 @@ export class EntityManager {
     this.entities = [];
     this.time = 0;
     this.spawnTimer = 1.2;
+    this.aquaticTimer = 1;
     this.villageTimer = 0;
     this.villageCache = [];
     this.villageCacheTimer = 0;
@@ -81,10 +84,18 @@ export class EntityManager {
         continue;
       }
       entity.update(dt, this.world, player, this);
+      this.updateStranding(entity, dt);
     }
 
     this.ensureNetherLife(player, dimension);
     this.ensureEndLife(player, dimension);
+    this.aquaticTimer -= dt;
+    if (this.aquaticTimer <= 0) {
+      // Fish and axolotls are kept as a visible school near the player instead
+      // of relying on the rare random spawn in trySpawn().
+      this.aquaticTimer = 3;
+      this.ensureAquaticLife(player, dimension);
+    }
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
@@ -122,6 +133,16 @@ export class EntityManager {
     entity.hit(SUN_DAMAGE_PER_SECOND * dt, null);
   }
 
+  /**
+   * A beached fish or axolotl gets a brief chance to flop back into the water,
+   * then suffocates. Death goes through the normal hit()/loot path.
+   */
+  updateStranding(entity, dt) {
+    if (!entity.aquatic || entity.dead || entity.inWater) return;
+    if (entity.dryTime < STRANDED_GRACE_SECONDS) return;
+    entity.hit(STRANDED_DAMAGE_PER_SECOND * dt);
+  }
+
   isSunlit(entity) {
     if (typeof this.world?.isSolidAt !== 'function') return false;
     const bx = Math.floor(entity.position.x);
@@ -154,25 +175,41 @@ export class EntityManager {
     return { x, y: height + 1.02, z };
   }
 
+  /**
+   * Water columns in rings around the player. Aquatic mobs should be spawned
+   * where the player can actually see them, not at a random distant offset.
+   */
+  findNearbyWaterColumns(player, maxRadius = 34) {
+    const columns = [];
+    for (let radius = 6; radius <= maxRadius; radius += 3) {
+      // Dense enough to spot a 3-4 block wide river at any angle.
+      const samples = Math.max(12, Math.round(radius * 2.5));
+      const phase = radius * 0.37;
+      for (let i = 0; i < samples; i++) {
+        const angle = (i / samples) * Math.PI * 2 + phase;
+        const x = Math.floor(player.position.x + Math.cos(angle) * radius) + 0.5;
+        const z = Math.floor(player.position.z + Math.sin(angle) * radius) + 0.5;
+        if (!this.world.isChunkLoadedAt?.(x, z) || dimensionAt(x, z) !== 'overworld') continue;
+        const surface = waterSurfaceAt(this.world, x, z, SEA_LEVEL + 4, SEA_LEVEL - 20);
+        if (surface == null || this.world.getBlock(Math.floor(x), surface + 1, Math.floor(z)) !== 0) continue;
+        columns.push({ x, z, y: surface, radius });
+      }
+      if (columns.length >= 3) break;
+    }
+    return columns;
+  }
+
   /** Finds a river/lake column or the adjacent sandy bank for aquatic mobs. */
   randomAquaticSpawnPoint(player, shore = false) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 18 + Math.random() * 20;
-    const x = Math.floor(player.position.x + Math.cos(angle) * distance) + 0.5;
-    const z = Math.floor(player.position.z + Math.sin(angle) * distance) + 0.5;
-    if (!this.world.isChunkLoadedAt(x, z) || dimensionAt(x, z) !== 'overworld') return null;
-    const surfaceY = waterSurfaceAt(this.world, x, z);
-    if (surfaceY == null) return null;
-
-    if (!shore) {
-      if (this.world.getBlock(Math.floor(x), surfaceY + 1, Math.floor(z)) !== 0) return null;
-      return { x, y: surfaceY - 0.35, z, shore: false };
-    }
+    const columns = this.findNearbyWaterColumns(player);
+    if (!columns.length) return null;
+    const spot = columns[Math.floor(Math.random() * Math.min(3, columns.length))];
+    if (!shore) return { x: spot.x, y: spot.y - 0.35, z: spot.z, shore: false };
 
     const offsets = [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 1], [-2, -1], [2, -1], [-2, 1]];
     for (const [dx, dz] of offsets) {
-      const sx = x + dx;
-      const sz = z + dz;
+      const sx = spot.x + dx;
+      const sz = spot.z + dz;
       if (dimensionAt(sx, sz) !== 'overworld') continue;
       const height = this.world.getHeightAt(Math.floor(sx), Math.floor(sz));
       if (height == null || height < SEA_LEVEL - 2 || height > SEA_LEVEL + 3) continue;
@@ -182,6 +219,42 @@ export class EntityManager {
       return { x: sx, y: height + 1.02, z: sz, shore: true };
     }
     return null;
+  }
+
+  /** Keeps a small school of fish/axolotls swimming in view of the player. */
+  ensureAquaticLife(player, dimension) {
+    if (dimension !== 'overworld') return;
+    const nearby = this.entities.filter((entity) => (
+      entity.aquatic && !entity.dead
+      && Math.hypot(entity.position.x - player.position.x, entity.position.z - player.position.z) < 44
+    ));
+    if (nearby.length >= AQUATIC_TARGET) return;
+    if (this.entities.length >= MAX_ENTITIES + AQUATIC_TARGET) return;
+    const point = this.randomAquaticSpawnPoint(player);
+    if (!point) return;
+
+    const fish = MOBS.fish;
+    const axolotl = MOBS.axolotl;
+    let remaining = Math.min(AQUATIC_TARGET - nearby.length, 3);
+    while (remaining > 0) {
+      const mob = Math.random() < 0.78 ? fish : axolotl;
+      const size = Math.min(
+        remaining,
+        mob === fish ? 2 + Math.floor(Math.random() * 2) : 1 + Math.floor(Math.random() * 2),
+      );
+      let placed = 0;
+      for (let i = 0; i < size; i++) {
+        const px = point.x + (Math.random() - 0.5) * 1.2;
+        const pz = point.z + (Math.random() - 0.5) * 1.2;
+        const surface = waterSurfaceAt(this.world, px, pz, SEA_LEVEL + 4, SEA_LEVEL - 20);
+        if (surface == null) continue;
+        this.spawnMob(mob.key, px, surface - mob.height * 0.55 + 0.12, pz, {
+          home: { x: point.x, z: point.z },
+        });
+        placed++;
+      }
+      remaining -= Math.max(1, placed);
+    }
   }
 
   /** The Nether plaza always has a small herd. */
@@ -250,32 +323,8 @@ export class EntityManager {
   }
 
   trySpawn(player, dimension, day) {
-    // Aquatic life spawns by day or night, in the water and along sandy banks.
-    if (dimension === 'overworld' && Math.random() < 0.28) {
-      const shore = Math.random() < 0.38;
-      const point = this.randomAquaticSpawnPoint(player, shore);
-      if (point) {
-        const fish = AQUATIC_MOBS.find((mob) => mob.key === 'fish') ?? AQUATIC_MOBS[0];
-        const axolotl = AQUATIC_MOBS.find((mob) => mob.key === 'axolotl') ?? fish;
-        const mob = Math.random() < (shore ? 0.4 : 0.72) ? fish : axolotl;
-        const group = shore
-          ? 1 + Math.floor(Math.random() * 2)
-          : 1 + Math.floor(Math.random() * Math.min(3, mob.group?.[1] ?? 2));
-        for (let i = 0; i < group; i++) {
-          const px = point.x + (Math.random() - 0.5) * (shore ? 0.4 : 1.4);
-          const pz = point.z + (Math.random() - 0.5) * (shore ? 0.4 : 1.4);
-          let py = point.y;
-          if (!shore) {
-            const surface = waterSurfaceAt(this.world, px, pz);
-            if (surface == null) continue;
-            py = surface - mob.height * 0.55 + 0.12;
-          }
-          this.spawnMob(mob.key, px, py, pz, { home: { x: point.x, z: point.z } });
-        }
-        return;
-      }
-    }
-
+    // Aquatic life is handled separately by ensureAquaticLife() so schools
+    // appear near the player instead of at a random distant water column.
     const hostile = !day || dimension !== 'overworld';
     if (hostile && Math.random() < (dimension === 'overworld' ? 0.7 : 0.9)) {
       const pool = hostilePool(dimension);

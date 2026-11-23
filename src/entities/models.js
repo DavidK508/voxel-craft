@@ -468,7 +468,11 @@ const builders = {
 
 export function buildMobModel(key) {
   // Blender GLB first; procedural boxes stay as the fallback.
-  return createMobModel(key) ?? (builders[key] ?? builders.pig)();
+  const model = createMobModel(key) ?? (builders[key] ?? builders.pig)();
+  // Aquatic mobs are tiny; a slight scale boost keeps them readable in water.
+  if (key === 'fish') model.group.scale.setScalar(1.3);
+  if (key === 'axolotl') model.group.scale.setScalar(1.15);
+  return model;
 }
 
 export function disposeMobModel(model) {

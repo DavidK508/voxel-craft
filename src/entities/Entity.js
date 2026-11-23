@@ -36,6 +36,7 @@ export class Entity {
     this.aquatic = !!mob.aquatic;
     this.inWater = false;
     this.airTime = 0;
+    this.dryTime = 0;
     this.waterTarget = null;
     this.waterTimer = 0;
     this.flopTimer = 0;
@@ -467,9 +468,11 @@ export class Entity {
       this.velocity.y *= Math.max(0, 1 - dt * 5);
       this.inWater = true;
       this.airTime = 0;
+      this.dryTime = 0;
       this.flopTimer = 0.6;
     } else {
       this.inWater = false;
+      this.dryTime += dt;
       this.velocity.y -= GRAVITY * 0.5 * dt;
       const below = world.getBlock?.(
         Math.floor(this.position.x),
