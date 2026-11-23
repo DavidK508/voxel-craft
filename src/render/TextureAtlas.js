@@ -16,10 +16,41 @@ function clearPixel(ctx, x, y) {
   ctx.clearRect(x, y, 1, 1);
 }
 
+/**
+ * Bilinear-interpolated coarse noise field. Keeps the hand-painted colour
+ * variation but removes the harsh per-pixel TV-static grain that reads as
+ * visual noise on large flat surfaces.
+ */
+function smoothNoiseField(rng, variance, grid = 4) {
+  const cells = [];
+  for (let gy = 0; gy <= grid; gy++) {
+    const row = [];
+    for (let gx = 0; gx <= grid; gx++) row.push((rng() - 0.5) * variance * 2);
+    cells.push(row);
+  }
+  const field = [];
+  for (let y = 0; y < SIZE; y++) {
+    const fy = (y / SIZE) * grid;
+    const y0 = Math.min(grid - 1, Math.floor(fy));
+    const ty = fy - y0;
+    const row = [];
+    for (let x = 0; x < SIZE; x++) {
+      const fx = (x / SIZE) * grid;
+      const x0 = Math.min(grid - 1, Math.floor(fx));
+      const tx = fx - x0;
+      row.push((cells[y0][x0] * (1 - tx) + cells[y0][x0 + 1] * tx) * (1 - ty)
+        + (cells[y0 + 1][x0] * (1 - tx) + cells[y0 + 1][x0 + 1] * tx) * ty);
+    }
+    field.push(row);
+  }
+  return field;
+}
+
 function fillNoise(ctx, base, variance, rng, alpha = 255) {
+  const field = smoothNoiseField(rng, variance);
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
-      const n = (rng() - 0.5) * variance * 2;
+      const n = field[y][x];
       pixel(ctx, x, y, base[0] + n, base[1] + n, base[2] + n, alpha);
     }
   }
@@ -75,7 +106,7 @@ function cobbleTexture(ctx, rng, mossy = false) {
     for (let dy = 0; dy < h; dy++) {
       for (let dx = 0; dx < w; dx++) {
         const edge = dx === 0 || dy === 0 ? -18 : 0;
-        const n = (rng() - 0.5) * 18;
+        const n = (rng() - 0.5) * 10;
         pixel(ctx, x + dx, y + dy, shade + n + edge, shade + n + edge, shade + n + edge);
       }
     }
@@ -133,13 +164,14 @@ function logTopTexture(ctx, rng, base, ring) {
 }
 
 function leavesTexture(ctx, rng, base, dark) {
+  const field = smoothNoiseField(rng, 14);
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
       if (rng() < 0.11) {
         clearPixel(ctx, x, y);
         continue;
       }
-      const n = (rng() - 0.5) * 28;
+      const n = field[y][x];
       const d = rng() < 0.24;
       pixel(ctx, x, y,
         (d ? dark[0] : base[0]) + n,
@@ -176,7 +208,7 @@ const PAINTERS = {
     for (let x = 0; x < SIZE; x++) {
       const depth = 3 + Math.floor(rng() * 3);
       for (let y = 0; y < depth; y++) {
-        const n = (rng() - 0.5) * 24;
+        const n = (rng() - 0.5) * 12;
         pixel(ctx, x, y, 94 + n, 157 + n, 52 + n);
       }
       if (rng() < 0.3) pixel(ctx, x, depth, 70, 127, 42);
@@ -287,15 +319,17 @@ const PAINTERS = {
   spruce_log_top: (ctx, rng) => logTopTexture(ctx, rng, [110, 84, 52], [68, 50, 30]),
   spruce_leaves: (ctx, rng) => leavesTexture(ctx, rng, [45, 92, 51], [28, 64, 35]),
   water: (ctx, rng) => {
+    // Smooth sine ripples only — no per-pixel random noise, so the scrolling
+    // wave animation stays calm instead of shimmering like static.
     for (let y = 0; y < SIZE; y++) {
       for (let x = 0; x < SIZE; x++) {
-        const wave = Math.sin((x + y * 0.8) * 0.9) * 7 + (rng() - 0.5) * 8;
+        const wave = Math.sin((x + y * 0.8) * 0.9) * 7;
         pixel(ctx, x, y, 45 + wave, 106 + wave, 191 + wave, 205);
       }
     }
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 5; i++) {
       const y = Math.floor(rng() * 16);
-      for (let x = Math.floor(rng() * 8); x < 16; x += 3) pixel(ctx, x, y, 105, 171, 236, 190);
+      for (let x = Math.floor(rng() * 8); x < 16; x += 4) pixel(ctx, x, y, 105, 171, 236, 170);
     }
   },
   lava: (ctx, rng) => {
