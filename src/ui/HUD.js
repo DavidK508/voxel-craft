@@ -1,5 +1,12 @@
 import { getItem, getToolInfo } from '../shared/items.js';
-import { MAP_RADIUS, MAP_SIZE, mapMarkers, projectPoint } from './minimap.js';
+import {
+  MAP_RADIUS,
+  MAP_SIZE,
+  TERRAIN_SAMPLE_SIZE,
+  mapMarkers,
+  projectPoint,
+  sampleTerrain,
+} from './minimap.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -42,6 +49,10 @@ export class HUD {
     this.bossFillEl = $('boss-fill');
     this.mapCanvas = $('minimap-canvas');
     this.mapCtx = this.mapCanvas?.getContext?.('2d') ?? null;
+    this.terrainCanvas = document.createElement('canvas');
+    this.terrainCanvas.width = TERRAIN_SAMPLE_SIZE;
+    this.terrainCanvas.height = TERRAIN_SAMPLE_SIZE;
+    this.terrainCtx = this.terrainCanvas.getContext?.('2d') ?? null;
 
     this.healthIcons = [];
     this.airIcons = [];
@@ -223,8 +234,16 @@ export class HUD {
     const scale = half / MAP_RADIUS;
     const center = state.position;
     ctx.clearRect(0, 0, size, size);
-    ctx.fillStyle = 'rgba(8, 14, 18, 0.82)';
-    ctx.fillRect(0, 0, size, size);
+    if (state.world && this.terrainCtx) {
+      const image = this.terrainCtx.createImageData(TERRAIN_SAMPLE_SIZE, TERRAIN_SAMPLE_SIZE);
+      image.data.set(sampleTerrain(state.world, center));
+      this.terrainCtx.putImageData(image, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.terrainCanvas, 0, 0, size, size);
+    } else {
+      ctx.fillStyle = 'rgba(8, 14, 18, 0.82)';
+      ctx.fillRect(0, 0, size, size);
+    }
 
     // Chunk-aligned grid makes distances easy to read at a glance.
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.09)';

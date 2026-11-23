@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { getBlock } from '../shared/blocks.js';
+import { SEA_LEVEL } from '../shared/constants.js';
+import { isInWater, isWaterBlock, waterSurfaceAt } from '../shared/water.js';
 import { buildMobModel } from './models.js';
 
 const GRAVITY = 26;
@@ -31,6 +33,12 @@ export class Entity {
     this.width = mob.width;
     this.height = mob.height;
     this.flying = !!mob.flying;
+    this.aquatic = !!mob.aquatic;
+    this.inWater = false;
+    this.airTime = 0;
+    this.waterTarget = null;
+    this.waterTimer = 0;
+    this.flopTimer = 0;
     this.position = new THREE.Vector3(position.x, position.y, position.z);
     this.velocity = new THREE.Vector3();
     this.yaw = options.yaw ?? randomAngle();
@@ -83,6 +91,8 @@ export class Entity {
       for (let bz = minZ; bz <= maxZ; bz++) {
         for (let bx = minX; bx <= maxX; bx++) {
           const id = world.getBlock(bx, by, bz);
+          // Aquatic mobs swim through water but are still stopped by solids/lava.
+          if (this.aquatic && isWaterBlock(id)) continue;
           const block = getBlock(id);
           if (block?.solid === true) return true;
           // Fluid blocks (water/lava) are treated as solid for entity collision,
@@ -172,7 +182,12 @@ export class Entity {
     let moveZ = 0;
     let speed = this.mob.speed;
 
-    if (this.kind === 'guardian') {
+    if (this.aquatic) {
+      const swim = this.aquaticAi(dt, world, dx, dz);
+      moveX = swim.x;
+      moveZ = swim.z;
+      speed = swim.speed;
+    } else if (this.kind === 'guardian') {
       // Iron golems stay near their village and intercept hostile mobs before
       // they can reach the villagers. Hurting a villager (or the golem itself)
       // makes them turn on the player for a while.
@@ -313,9 +328,11 @@ export class Entity {
     // Avoid treating water/lava as ground so entities don't "walk on water".
     if (this.world && this.world.getBlock) {
       const below = this.world.getBlock(Math.floor(this.position.x), Math.floor(this.position.y - 0.1), Math.floor(this.position.z));
-      if (below?.fluid === true) this.onGround = false;
+      if (getBlock(below)?.fluid === true) this.onGround = false;
     }
-    if (this.flying) {
+    if (this.aquatic) {
+      this.updateAquaticBuoyancy(world, dt);
+    } else if (this.flying) {
       const targetY = this.groundBelow(world, this.position.y + 4) ?? this.position.y;
       const bob = Math.sin(this.time * 2.4 + this.walkPhase) * 0.35;
       const wanted = targetY + 2.2 + bob;
@@ -347,6 +364,127 @@ export class Entity {
 
     this.syncModel(dt);
     if (this.hostile && this.mob.explodes) this.updateFuse(dt, this.huntTarget, player);
+  }
+
+  /** Fish and axolotls swim, then flop toward the nearest water when stranded. */
+  aquaticAi(dt, world, dx, dz) {
+    const surface = waterSurfaceAt(
+      world,
+      this.position.x,
+      this.position.z,
+      Math.max(SEA_LEVEL + 8, this.position.y + 10),
+      SEA_LEVEL - 22,
+    );
+    const wet = isInWater(world, this.position, 0.1)
+      || (surface != null && this.position.y <= surface + 1.1);
+    this.inWater = wet;
+
+    if (wet) {
+      this.airTime = 0;
+      this.waterTarget = null;
+    } else {
+      this.airTime += dt;
+      this.waterTimer -= dt;
+      if (this.waterTimer <= 0) {
+        this.waterTimer = 1;
+        this.waterTarget = this.findNearbyWater(world, 14);
+      }
+    }
+
+    if (this.fleeTimer > 0 && Math.hypot(dx, dz) > 0.01) {
+      this.state = 'flee';
+      this.yaw = Math.atan2(dx, dz);
+      return {
+        x: -Math.sin(this.yaw),
+        z: -Math.cos(this.yaw),
+        speed: this.mob.speed * 1.3,
+      };
+    }
+
+    if (!wet && this.waterTarget) {
+      const tx = this.waterTarget.x - this.position.x;
+      const tz = this.waterTarget.z - this.position.z;
+      if (Math.hypot(tx, tz) > 0.4) {
+        this.state = 'to_water';
+        this.yaw = Math.atan2(-tx, -tz);
+        return {
+          x: -Math.sin(this.yaw),
+          z: -Math.cos(this.yaw),
+          speed: this.mob.speed * 1.2,
+        };
+      }
+    }
+
+    this.timer -= dt;
+    if (this.timer <= 0) {
+      this.timer = 2 + Math.random() * 4;
+      this.state = Math.random() < 0.5 ? 'idle' : 'wander';
+      this.yaw = randomAngle();
+    }
+    if (this.state === 'wander') {
+      return {
+        x: -Math.sin(this.yaw) * 0.5,
+        z: -Math.cos(this.yaw) * 0.5,
+        speed: this.mob.speed,
+      };
+    }
+    return { x: 0, z: 0, speed: this.mob.speed };
+  }
+
+  findNearbyWater(world, radius = 14) {
+    let best = null;
+    let bestDistance = Infinity;
+    const bx = Math.floor(this.position.x);
+    const bz = Math.floor(this.position.z);
+    const fromY = Math.max(SEA_LEVEL + 8, this.position.y + 10);
+    for (let dz = -radius; dz <= radius; dz += 3) {
+      for (let dx = -radius; dx <= radius; dx += 3) {
+        const x = bx + dx;
+        const z = bz + dz;
+        const y = waterSurfaceAt(world, x + 0.5, z + 0.5, fromY, SEA_LEVEL - 22);
+        if (y == null) continue;
+        const distance = dx * dx + dz * dz;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { x: x + 0.5, z: z + 0.5, y };
+        }
+      }
+    }
+    return best;
+  }
+
+  updateAquaticBuoyancy(world, dt) {
+    const surface = waterSurfaceAt(
+      world,
+      this.position.x,
+      this.position.z,
+      Math.max(SEA_LEVEL + 8, this.position.y + 10),
+      SEA_LEVEL - 22,
+    );
+    if (surface != null && this.position.y <= surface + 1.1) {
+      const targetY = surface - this.height * 0.55 + 0.12;
+      this.velocity.y += (targetY - this.position.y) * Math.min(1, dt * 6);
+      this.velocity.y *= Math.max(0, 1 - dt * 5);
+      this.inWater = true;
+      this.airTime = 0;
+      this.flopTimer = 0.6;
+    } else {
+      this.inWater = false;
+      this.velocity.y -= GRAVITY * 0.5 * dt;
+      const below = world.getBlock?.(
+        Math.floor(this.position.x),
+        Math.floor(this.position.y - 0.1),
+        Math.floor(this.position.z),
+      );
+      const grounded = below != null && getBlock(below)?.solid === true;
+      this.flopTimer -= dt;
+      if (grounded && this.flopTimer <= 0) {
+        // Stranded mobs flap along the bank instead of sitting motionless.
+        this.velocity.y = 3.1;
+        this.flopTimer = 1.2 + Math.random() * 0.8;
+      }
+    }
+    this.velocity.y = Math.max(-9, Math.min(5, this.velocity.y));
   }
 
   /**

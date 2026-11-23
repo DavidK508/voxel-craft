@@ -156,14 +156,31 @@ export const MOBS = Object.freeze({
       { id: 440, min: 2, max: 4 },
     ],
   },
+  fish: {
+    key: 'fish', name: 'Рыба', kind: 'passive', model: 'fish',
+    health: 4, speed: 1.4, width: 0.42, height: 0.38,
+    aquatic: true, biomes: [BIOME.OCEAN, BIOME.BEACH, BIOME.SWAMP],
+    group: [3, 6], spawnWeight: 1.2,
+    drops: [{ id: 473, min: 1, max: 2 }],
+  },
+  axolotl: {
+    key: 'axolotl', name: 'Аксолотль', kind: 'passive', model: 'axolotl',
+    health: 7, speed: 1.1, width: 0.5, height: 0.55,
+    aquatic: true, biomes: [BIOME.OCEAN, BIOME.BEACH, BIOME.SWAMP],
+    group: [1, 2], spawnWeight: 0.6,
+    drops: [{ id: 448, min: 0, max: 1 }, { id: 473, min: 0, max: 1 }],
+  },
 });
 
 export const PASSIVE_MOBS = Object.values(MOBS).filter((m) => m.kind === 'passive' || m.kind === 'neutral');
+export const AQUATIC_MOBS = Object.values(MOBS).filter((mob) => mob.aquatic);
 export const HOSTILE_MOBS = Object.values(MOBS).filter((m) => m.kind === 'hostile');
 
 /** Mobs that can spawn in a biome during the overworld day. */
 export function spawnablePassive(biome) {
-  return PASSIVE_MOBS.filter((mob) => mob.biomes?.includes(biome) && !mob.dimensions);
+  return PASSIVE_MOBS.filter((mob) => (
+    mob.biomes?.includes(biome) && !mob.dimensions && !mob.aquatic
+  ));
 }
 
 /** Peaceful mobs that belong to a non-overworld dimension (e.g. Nether pigs). */

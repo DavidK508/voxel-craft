@@ -21,6 +21,7 @@ import {
 } from '../shared/blocks.js';
 import { loadAppearance, saveAppearance } from '../shared/appearance.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
+import { waterSurfaceAt } from '../shared/water.js';
 import { offersForVillager, performTrade } from '../shared/trades.js';
 import {
   GAME_MODE_CREATIVE,
@@ -1548,10 +1549,11 @@ export class Game {
     this.hud.setPlayerList(entries, header);
   }
 
-  /** Feeds the corner minimap with local/remote respawn and death markers. */
+  /** Feeds the corner minimap with terrain and local/remote markers. */
   updateMap() {
     if (!this.hud?.updateMap || !this.player) return;
     this.hud.updateMap({
+      world: this.world,
       position: this.player.position,
       yaw: this.player.yaw,
       spawn: this.spawn,
@@ -2915,13 +2917,28 @@ export class Game {
       z = Math.floor(this.player.position.z + direction.z * 2) + 0.5;
       surfaceY = this.world.getHeightAt?.(Math.floor(x), Math.floor(z));
     }
-    if (surfaceY == null || !this.world.isChunkLoadedAt?.(x, z)) return false;
+    if (!this.world.isChunkLoadedAt?.(x, z)) return false;
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
 
-    const ground = this.world.getBlock(Math.floor(x), surfaceY, Math.floor(z));
-    if (ground === 0 || ground === 11 || ground === 30 || ground === 55 || ground === 58) return false;
-    if (this.world.getBlock(Math.floor(x), surfaceY + 1, Math.floor(z)) !== 0) return false;
+    let spawnY = null;
+    if (mob.aquatic) {
+      const waterY = waterSurfaceAt(this.world, x, z);
+      if (waterY != null && this.world.getBlock(bx, waterY + 1, bz) === 0) {
+        spawnY = waterY - mob.height * 0.55 + 0.12;
+      }
+    }
+    if (spawnY === null && surfaceY != null) {
+      const ground = this.world.getBlock(bx, surfaceY, bz);
+      if (ground !== 0 && ground !== 11 && ground !== 30 && ground !== 55 && ground !== 58
+        && this.world.getBlock(bx, surfaceY + 1, bz) === 0) {
+        // Aquatic mobs can also be placed on a bank; they flop back to water.
+        spawnY = surfaceY + 1.02;
+      }
+    }
+    if (spawnY === null) return false;
 
-    const entity = this.entities.spawnMob(item.spawn, x, surfaceY + 1.02, z, {
+    const entity = this.entities.spawnMob(item.spawn, x, spawnY, z, {
       home: { x, z },
     });
     if (!entity) return false;

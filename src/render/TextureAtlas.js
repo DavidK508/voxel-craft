@@ -1203,6 +1203,19 @@ function drawExtraItemIcon(ctx, key, item = null) {
     }
     setIconPixel(ctx, 6, 6, '#c8b98e');
     setIconPixel(ctx, 9, 8, '#c8b98e');
+  } else if (key === 'fish') {
+    for (let x = 4; x <= 11; x++) {
+      const half = x < 6 || x > 9 ? 2 : 3;
+      for (let y = 8 - half; y <= 8 + half; y++) {
+        setIconPixel(ctx, x, y, (x + y) % 4 === 0 ? '#7fd8e8' : '#49a8c4');
+      }
+    }
+    for (let i = 0; i < 4; i++) {
+      setIconPixel(ctx, 12 + (i < 2 ? 0 : 1), 5 + i, '#3b8fb0');
+      setIconPixel(ctx, 12 + (i < 2 ? 0 : 1), 10 + (3 - i), '#3b8fb0');
+    }
+    setIconPixel(ctx, 5, 7, '#102a38');
+    setIconPixel(ctx, 7, 5, '#2f7d99');
   } else if (key === 'honey_bottle') {
     rect(6, 5, 4, 6, '#e8a92a');
     rect(6, 5, 4, 1, '#f6cf62');

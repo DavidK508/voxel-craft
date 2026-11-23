@@ -45,6 +45,7 @@ export const ITEM_IDS = Object.freeze({
   BEETROOT: 447,
   SLIME_BALL: 448,
   REDSTONE: 449,
+  RAW_FISH: 473,
   LEATHER_HELMET: 500,
   LEATHER_CHESTPLATE: 501,
   LEATHER_LEGGINGS: 502,
@@ -189,6 +190,7 @@ const materialDefs = [
   { id: 447, key: 'beetroot', name: 'Свёкла', stack: 64, icon: 'beetroot', food: { nutrition: 1, saturation: 0.6 } },
   { id: 448, key: 'slime_ball', name: 'Слизевый шарик', stack: 64, icon: 'slime_ball' },
   { id: 449, key: 'redstone', name: 'Redstone', stack: 64, icon: 'redstone' },
+  { id: 473, key: 'raw_fish', name: 'Сырая рыба', stack: 64, icon: 'fish', food: { nutrition: 2, saturation: 1.2 } },
 ];
 
 /** One egg per creature. Killing any mob drops the egg that summons it again. */
@@ -214,6 +216,8 @@ const SPAWN_EGG_DEFS = Object.freeze([
   ['blaze', 'Яйцо всполоха'],
   ['nether_pig', 'Яйцо адской свиньи'],
   ['ender_dragon', 'Яйцо дракона Края'],
+  ['fish', 'Яйцо рыбы'],
+  ['axolotl', 'Яйцо аксолотля'],
 ]);
 
 const spawnEggIds = new Map();

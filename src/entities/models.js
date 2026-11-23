@@ -411,6 +411,59 @@ const builders = {
     }
     return { group, legs, wings, head };
   },
+  fish() {
+    const group = new THREE.Group();
+    box(group, 0.28, 0.22, 0.52, 0x49a8c4, 0, 0.22, 0);
+    box(group, 0.2, 0.16, 0.24, 0x7fd8e8, 0, 0.23, -0.31);
+    box(group, 0.05, 0.24, 0.2, 0x3b8fb0, 0, 0.22, 0.38);
+    box(group, 0.16, 0.08, 0.14, 0x3b8fb0, 0, 0.35, 0.02);
+
+    const wings = [];
+    for (const side of [-1, 1]) {
+      const fin = new THREE.Group();
+      fin.position.set(side * 0.14, 0.22, 0.02);
+      box(fin, 0.16, 0.03, 0.18, 0x3b8fb0, side * 0.08, 0, 0);
+      group.add(fin);
+      wings.push(fin);
+    }
+
+    const head = new THREE.Group();
+    head.position.set(0, 0.23, -0.31);
+    box(head, 0.04, 0.04, 0.04, 0x102a38, -0.08, 0.04, -0.1);
+    box(head, 0.04, 0.04, 0.04, 0x102a38, 0.08, 0.04, -0.1);
+    group.add(head);
+    return { group, legs: [], wings, head };
+  },
+  axolotl() {
+    const group = new THREE.Group();
+    const legs = [];
+    for (const side of [-1, 1]) {
+      legs.push(leg(group, side * 0.16, 0.24, -0.16, 0.1, 0.2, 0.1, 0xe88bae));
+      legs.push(leg(group, side * 0.16, 0.24, 0.2, 0.1, 0.2, 0.1, 0xe88bae));
+    }
+    box(group, 0.42, 0.24, 0.58, 0xf3a8c4, 0, 0.3, 0.04);
+    for (let i = 0; i < 3; i++) {
+      box(group, 0.34 - i * 0.07, 0.18, 0.16, 0xe88bae, 0, 0.29, 0.37 + i * 0.14);
+    }
+
+    const head = new THREE.Group();
+    head.position.set(0, 0.31, -0.35);
+    box(head, 0.42, 0.28, 0.3, 0xf6b8d0);
+    box(head, 0.05, 0.05, 0.04, 0x2a1620, -0.12, 0.05, -0.16);
+    box(head, 0.05, 0.05, 0.04, 0x2a1620, 0.12, 0.05, -0.16);
+    box(head, 0.12, 0.03, 0.03, 0xb85f7f, 0, -0.08, -0.16);
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const gill = new THREE.Group();
+        gill.position.set(side * 0.2, 0.04 - i * 0.07, 0.02 + i * 0.06);
+        box(gill, 0.18, 0.05, 0.05, 0xe06f9c, side * 0.09, 0, 0);
+        box(gill, 0.06, 0.06, 0.06, 0xffc2d8, side * 0.18, 0, 0);
+        head.add(gill);
+      }
+    }
+    group.add(head);
+    return { group, legs, head };
+  },
 };
 
 export function buildMobModel(key) {

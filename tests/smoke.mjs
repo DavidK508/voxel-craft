@@ -25,6 +25,7 @@ import {
   isSolid,
 } from '../src/shared/blocks.js';
 import { getItem, getMaxStack, createItemStack, getArmorInfo, getSpawnEggId } from '../src/shared/items.js';
+import { isInWater, waterSurfaceAt } from '../src/shared/water.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
 import { findRecipe } from '../src/shared/recipes.js';
 import { SimplexNoise, NoiseField, mulberry32 } from '../src/shared/noise.js';
@@ -56,7 +57,7 @@ import {
   WorldGenerator,
 } from '../src/world/generator.js';
 import { buildPaddedVolume, meshChunk } from '../src/world/mesher.js';
-import { HOSTILE_MOBS, MOBS, passivePool, spawnablePassive } from '../src/entities/mobs.js';
+import { AQUATIC_MOBS, HOSTILE_MOBS, MOBS, passivePool, spawnablePassive } from '../src/entities/mobs.js';
 import { Entity } from '../src/entities/Entity.js';
 import { EntityManager } from '../src/entities/EntityManager.js';
 import { FluidSimulation } from '../src/world/Fluids.js';
@@ -66,7 +67,9 @@ import {
   mapMarkers,
   normalizeMapPoint,
   playerColor,
-  projectPoint,
+   projectPoint,
+  sampleTerrain,
+  terrainColorAt,
 } from '../src/ui/minimap.js';
 
 const results = [];
@@ -172,6 +175,29 @@ function makeFlatWorld(ground = 5) {
     },
     isSolidAt(x, y, z) {
       return y < 0 || y <= ground;
+    },
+    getHeightAt() {
+      return ground;
+    },
+    isChunkLoadedAt() {
+      return true;
+    },
+  };
+}
+
+/** A river at x 0..8 filled to sea level, with dry banks on either side. */
+function makeWaterWorld() {
+  const ground = SEA_LEVEL - 6;
+  return {
+    getBlock(x, y, z) {
+      if (y < 0) return 13;
+      if (y <= ground) return 1;
+      if (y <= SEA_LEVEL && x >= 0 && x <= 8) return 11;
+      return 0;
+    },
+    isSolidAt(x, y, z) {
+      const id = this.getBlock(x, y, z);
+      return id !== 0 && id !== 11;
     },
     getHeightAt() {
       return ground;
@@ -1239,6 +1265,110 @@ await test('minimap collects respawn, death and remote player markers', () => {
   assert.equal(playerColor('anna'), playerColor('anna'));
   assert.deepEqual(normalizeMapPoint({ x: '4', z: '5' }), { x: 4, y: 0, z: 5 });
   assert.equal(normalizeMapPoint(null), null);
+});
+
+await test('minimap samples loaded terrain and water into an RGBA buffer', () => {
+  const world = {
+    getHeightAt: (x) => (x < 0 ? SEA_LEVEL - 7 : SEA_LEVEL + 2),
+    getBiomeIdAt: (x) => (x < 0 ? BIOME.OCEAN : BIOME.FOREST),
+    getBlock: (x, y) => (x < 0 && y <= SEA_LEVEL ? 11 : 1),
+  };
+  const pixels = sampleTerrain(world, { x: 0, z: 0 }, 8, 8, 2);
+  assert.equal(pixels.length, 8 * 8 * 4);
+  assert.deepEqual(
+    Array.from(pixels.slice(0, 3)),
+    terrainColorAt(BIOME.OCEAN, SEA_LEVEL - 7, 11),
+    'water columns use a blue depth-tinted colour',
+  );
+  const landOffset = (4 * 8 + 4) * 4;
+  assert.deepEqual(
+    Array.from(pixels.slice(landOffset, landOffset + 3)),
+    terrainColorAt(BIOME.FOREST, SEA_LEVEL + 2, 1),
+    'land uses its biome colour',
+  );
+  assert.ok(pixels[3] === 255 && pixels[landOffset + 3] === 255);
+
+  const empty = sampleTerrain({}, { x: 0, z: 0 }, 2, 2, 2);
+  assert.equal(empty[3], 255, 'unloaded chunks stay opaque');
+  assert.ok(empty[0] < 32, 'unloaded chunks draw as dark terrain');
+});
+
+await test('fish and axolotl swim, spawn on banks and flop back to water', () => {
+  assert.deepEqual(AQUATIC_MOBS.map((mob) => mob.key).sort(), ['axolotl', 'fish']);
+  assert.ok(MOBS.fish.aquatic && MOBS.axolotl.aquatic);
+  assert.ok(MOBS.fish.drops.some((drop) => drop.id === 473), 'fish drop raw fish');
+  assert.equal(getItem(473).key, 'raw_fish');
+  assert.ok(!spawnablePassive(BIOME.OCEAN).some((mob) => mob.aquatic), 'fish are not land spawns');
+  for (const key of ['fish', 'axolotl']) {
+    assert.equal(getItem(getSpawnEggId(key)).spawn, key);
+  }
+
+  const world = makeWaterWorld();
+  assert.equal(waterSurfaceAt(world, 2, 0), SEA_LEVEL);
+  assert.equal(waterSurfaceAt(world, 12, 0), null);
+  assert.equal(isInWater(world, { x: 2, y: SEA_LEVEL, z: 0 }), true);
+  assert.equal(isInWater(world, { x: 12, y: SEA_LEVEL, z: 0 }), false);
+
+  const player = { position: { x: 200, y: 70, z: 200 }, creative: false, dead: false };
+  const fish = new Entity(MOBS.fish, { x: 2.5, y: SEA_LEVEL + 2.5, z: 0.5 });
+  const manager = { entities: [fish], onAttack: null };
+  assert.equal(fish.collides(world, 2.5, SEA_LEVEL - 0.5, 0.5), false, 'fish move through water');
+  for (let i = 0; i < 60; i++) fish.update(1 / 30, world, player, manager);
+  assert.equal(fish.inWater, true, 'fish settles in the river');
+  assert.ok(
+    fish.position.y >= SEA_LEVEL - 2 && fish.position.y <= SEA_LEVEL + 0.5,
+    `fish stayed near the surface (y=${fish.position.y})`,
+  );
+
+  const stranded = new Entity(MOBS.axolotl, { x: 12.5, y: SEA_LEVEL - 5 + 1.02, z: 0.5 });
+  manager.entities.push(stranded);
+  stranded.update(1 / 30, world, player, manager);
+  assert.ok(stranded.waterTarget, 'a stranded axolotl must find nearby water');
+  assert.equal(stranded.state, 'to_water');
+  assert.ok(stranded.velocity.x < 0, 'it flops towards the river');
+});
+
+await test('aquatic spawn eggs place mobs in water or on the bank', async () => {
+  globalThis.location ??= { search: '' };
+  const { Game } = await import('../src/game/Game.js');
+  const world = makeWaterWorld();
+  const spawned = [];
+  let consumed = 0;
+  const fakeGame = {
+    world,
+    player: {
+      position: { x: 12, y: SEA_LEVEL - 4, z: 0 },
+      getDirection: () => ({ x: 0, y: 0, z: -1 }),
+    },
+    entities: {
+      spawnMob(type, x, y, z, options) {
+        spawned.push({ type, x, y, z, options });
+        return { name: MOBS[type].name };
+      },
+    },
+    isCreative: () => false,
+    inventory: { consumeSelected(count) { consumed += count; } },
+    audio: { playClick() {} },
+    hud: { toast() {} },
+    onInventoryChanged() {},
+  };
+  const egg = getItem(getSpawnEggId('fish'));
+
+  assert.equal(Game.prototype.useSpawnEgg.call(
+    fakeGame,
+    egg,
+    { x: 2, y: SEA_LEVEL, z: 0, id: 11, normal: { y: 1 } },
+  ), true);
+  assert.equal(spawned[0].type, 'fish');
+  assert.ok(spawned[0].y < SEA_LEVEL && spawned[0].y > SEA_LEVEL - 1, 'fish spawns underwater');
+
+  assert.equal(Game.prototype.useSpawnEgg.call(
+    fakeGame,
+    egg,
+    { x: 12, y: SEA_LEVEL - 6, z: 0, id: 1, normal: { y: 1 } },
+  ), true);
+  assert.equal(spawned[1].y, SEA_LEVEL - 6 + 1.02, 'fish can also be placed on a bank');
+  assert.equal(consumed, 2);
 });
 
 await test('fluids flow downwards and spread sideways', () => {
