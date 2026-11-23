@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 import {
@@ -1249,6 +1250,19 @@ await test('inventory equips and persists armor', () => {
   for (let i = 0; i < 10000; i++) restored.damageArmor(10);
   assert.ok(restored.armor.every((stack) => stack === null));
   assert.equal(restored.armorPoints(), 0);
+});
+
+await test('HUD stacks debug and online players instead of overlapping them', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const start = html.indexOf('<div class="hud-left-stack">');
+  const end = html.indexOf('<div id="break-progress"');
+  assert.ok(start >= 0 && end > start, 'the shared left HUD stack must exist');
+  const stack = html.slice(start, end);
+  assert.match(stack, /id="debug"/);
+  assert.match(stack, /id="player-list"/);
+  assert.match(css, /\.hud-left-stack\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(css, /\.player-list\s*\{[^}]*position:\s*static/);
 });
 
 await test('minimap projects world points around the player', () => {

@@ -204,7 +204,13 @@
     <!-- HUD -->
     <section id="hud" class="hidden">
       <div id="crosshair" class="crosshair"></div>
-      <div id="debug" class="debug hidden"></div>
+      <div class="hud-left-stack">
+        <div id="debug" class="debug hidden"></div>
+        <div id="player-list" class="player-list hidden">
+          <div id="player-list-header" class="player-list-header">Онлайн</div>
+          <div id="player-list-items" class="player-list-items"></div>
+        </div>
+      </div>
       <div id="break-progress" class="break-progress hidden"><div id="break-progress-fill"></div></div>
 
       <div id="hud-top-left" class="hud-top-left">
@@ -225,11 +231,6 @@
       <div id="boss-bar" class="boss-bar hidden">
         <div id="boss-name" class="boss-name">Дракон Края</div>
         <div class="boss-track"><div id="boss-fill" class="boss-fill"></div></div>
-      </div>
-
-      <div id="player-list" class="player-list hidden">
-        <div id="player-list-header" class="player-list-header">Онлайн</div>
-        <div id="player-list-items" class="player-list-items"></div>
       </div>
 
       <div id="toast" class="toast hidden"></div>
