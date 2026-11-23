@@ -128,6 +128,6 @@
 
 ### Сессия 16 — сборка 1.3.0
 
-- Версия повышена до `1.3.0` в `package.json`, `package-lock.json`, `index.html` и README; свежие Linux-дистрибутивы собраны из исходников этой версии (`electron-builder`): `deb`, `AppImage`, `rpm`, `pacman`, `apk`, `freebsd`, `tar.gz`, `tar.xz`, `zip`, `7z`. Файл `dist/latest-linux.yml` указывает на 1.3.0 (SHA512 проверены). Windows-установщик в этой сессии не пересобирался, поэтому `latest.yml` остался от 1.1.1.
+- Версия повышена до `1.3.0` в `package.json`, `package-lock.json`, `index.html` и README; свежие дистрибутивы собраны из исходников этой версии (`electron-builder`). Linux: `deb`, `AppImage`, `rpm`, `pacman`, `apk`, `freebsd`, `tar.gz`, `tar.xz`, `zip`, `7z`; Windows: NSIS-установщик `VoxelCraft Setup 1.3.0.exe`. Файлы `dist/latest-linux.yml` и `dist/latest.yml` указывают на 1.3.0, SHA512 проверены.
 - В сборку вошли все изменения 1.2.0: пиксель-арт текстуры, рельеф на мини-карте, реки, водные мобы со стайкой рядом с игроком и гибелью на суше, дракон Края, яйца призов, адаптивный рендер и исправленное расположение HUD.
 - Игра по-прежнему требует родной OpenGL (Mesa/Intel HD 4400 даёт ~30–47 FPS). Флаги `--use-angle=swiftshader` / `--use-gl=swiftshader` не использовать: они роняют FPS до ~10.
