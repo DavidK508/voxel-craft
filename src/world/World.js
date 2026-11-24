@@ -43,6 +43,7 @@ function buildGeometry(data) {
   geometry.setAttribute('aSky', new THREE.BufferAttribute(data.skies, 1, true));
   geometry.setAttribute('aHorizon', new THREE.BufferAttribute(data.horizons, 2, true));
   geometry.setAttribute('aLight', new THREE.BufferAttribute(data.lights, 1, true));
+  geometry.setAttribute('aTint', new THREE.BufferAttribute(data.tints ?? new Uint8Array(data.positions.length / 3 * 3).fill(128), 3, true));
   geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
   geometry.computeBoundingSphere();
   return geometry;
@@ -243,6 +244,7 @@ export class World {
         this.pool.run('mesh', {
           padded,
           tops,
+          biomes: chunk.biomes,
           originX: chunk.cx * CHUNK_SIZE,
           originZ: chunk.cz * CHUNK_SIZE,
         }, [padded.buffer]).then((result) => {

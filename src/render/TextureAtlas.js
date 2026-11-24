@@ -1084,6 +1084,43 @@ const PAINTERS = {
     pixel(ctx, 8, 8, 236, 196, 72);
     pixel(ctx, 8, 9, 236, 196, 72);
   },
+  tall_grass: (ctx, rng) => {
+    for (const x of [3, 6, 9, 12]) {
+      const top = 2 + Math.floor(rng() * 4);
+      for (let y = top; y < 16; y++) {
+        pixel(ctx, x + (y > 11 ? 1 : 0), y, 82, 146 + Math.floor(rng() * 24), 56);
+      }
+      pixel(ctx, x - 1, top + 2, 104, 168, 62);
+      pixel(ctx, x + 2, top + 3, 68, 132, 48);
+    }
+  },
+  dandelion: (ctx) => {
+    for (let y = 9; y < 16; y++) pixel(ctx, 8, y, 74, 136, 52);
+    pixel(ctx, 7, 12, 58, 116, 44);
+    pixel(ctx, 9, 11, 92, 158, 58);
+    for (const [x, y] of [[8, 3], [8, 7], [4, 5], [12, 5], [5, 2], [11, 2], [5, 8], [11, 8]]) {
+      pixel(ctx, x, y, 246, 214, 68);
+    }
+    pixel(ctx, 8, 5, 255, 242, 132);
+  },
+  poppy: (ctx) => {
+    for (let y = 9; y < 16; y++) pixel(ctx, 8, y, 64, 124, 46);
+    pixel(ctx, 7, 12, 88, 152, 54);
+    pixel(ctx, 6, 10, 54, 112, 40);
+    for (const [x, y] of [[8, 3], [8, 7], [4, 5], [12, 5], [5, 2], [11, 2], [5, 8], [11, 8]]) {
+      pixel(ctx, x, y, 210, 42, 42);
+    }
+    pixel(ctx, 8, 5, 36, 34, 28);
+  },
+  dead_bush: (ctx, rng) => {
+    for (const [x0, x1, top] of [[4, 1, 5], [8, 8, 3], [12, 15, 6]]) {
+      for (let y = top; y < 16; y++) {
+        const x = x0 + Math.round((x1 - x0) * ((y - top) / (16 - top)));
+        pixel(ctx, x, y, 112, 82, 48);
+        if (rng() > 0.7) pixel(ctx, x + 1, y, 88, 64, 38);
+      }
+    }
+  },
 };
 
 function makeCanvas(size = SIZE) {

@@ -52,6 +52,9 @@ import {
   isTillable,
 } from '../src/shared/farming.js';
 import { CHEST_BLOCK, CHEST_SLOTS } from '../src/shared/storage.js';
+import { getBiomeInfo, biomeWeather } from '../src/shared/biomes.js';
+import { ANIMAL_TIMING, animalDiet } from '../src/shared/animalFoods.js';
+import { Weather } from '../src/render/Weather.js';
 import { ContainerStorage } from '../src/game/ContainerStorage.js';
 import { isInWater, waterSurfaceAt } from '../src/shared/water.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
@@ -253,7 +256,7 @@ function makeSetWorld(solids) {
 const noInput = { isDown: () => false, isMouseDown: () => false };
 
 await test('block registry is complete and immutable', () => {
-  assert.equal(BLOCK_DEFS.length, 200);
+  assert.equal(BLOCK_DEFS.length, 204);
   assert.equal(getBlock(0).key, 'air');
   assert.equal(getBlock(1).key, 'stone');
   assert.equal(getBlock(999).key, 'air');
@@ -899,7 +902,7 @@ await test('emissive blocks bake block light into the mesh', () => {
 });
 
 await test('decorative blocks use rectangular, non-cube geometry', () => {
-  assert.equal(TEXTURE_COUNT, 112);
+  assert.equal(TEXTURE_COUNT, 116);
   for (const name of ['bed_top', 'bed_side', 'torch_stick', 'torch_flame', 'oak_fence',
     'door_bottom', 'door_top', 'lever_off', 'button_off', 'plate_off', 'wire_off',
     'repeater_off', 'piston_side', 'lamp_off', 'redstone_block', 'redstone_ore']) {
@@ -2091,6 +2094,256 @@ await test('drops keep stable network ids and can be mirrored', () => {
   assert.equal(drops.spawnRemote(440, 1, 0, 0, 0, null, 0.2, 79), null, 'duplicate uid must be ignored');
   drops.networkSink = null;
   drops.dispose();
+});
+
+await test('biomes expose distinct palettes, weather and ground cover', () => {
+  const ids = Object.values(BIOME);
+  assert.equal(ids.length, 12);
+  assert.notDeepEqual(
+    BIOME_INFO[BIOME.DESERT].grassTint,
+    BIOME_INFO[BIOME.FOREST].grassTint,
+  );
+  assert.notEqual(BIOME_INFO[BIOME.DESERT].fog, BIOME_INFO[BIOME.FOREST].fog);
+  assert.equal(biomeWeather(BIOME.DESERT), 'none');
+  assert.equal(biomeWeather(BIOME.SNOWY), 'snow');
+  assert.equal(biomeWeather(BIOME.SWAMP), 'rain');
+  assert.equal(getBiomeInfo(999).name, BIOME_INFO[BIOME.PLAINS].name);
+  for (const id of ids) {
+    const info = BIOME_INFO[id];
+    assert.ok(info.name, `biome ${id} needs a name`);
+    assert.equal(info.grassTint.length, 3);
+    assert.equal(info.leavesTint.length, 3);
+    assert.equal(info.waterTint.length, 3);
+    assert.ok(Array.isArray(info.groundCover));
+    for (const [block] of info.groundCover) {
+      assert.ok(getBlock(block), `biome ${id} references unknown block ${block}`);
+    }
+  }
+});
+
+await test('generated chunks place climate-appropriate ground cover', () => {
+  const seen = new Set();
+  for (let cx = -2; cx <= 2 && seen.size < 3; cx++) {
+    for (let cz = -2; cz <= 2 && seen.size < 3; cz++) {
+      const { blocks } = generateChunk(cx, cz, 0x5eed);
+      for (let z = 0; z < CHUNK_SIZE; z++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+          for (let y = SEA_LEVEL + 1; y < WORLD_HEIGHT - 18; y++) {
+            const id = blocks[localIndex(x, y, z)];
+            if (![201, 202, 203, 204].includes(id)) continue;
+            seen.add(id);
+            assert.ok(
+              getBlock(blocks[localIndex(x, y - 1, z)]).solid,
+              'ground cover must sit on solid ground',
+            );
+          }
+        }
+      }
+    }
+  }
+  assert.ok(seen.size >= 2, `expected several kinds of ground cover, got ${[...seen]}`);
+});
+
+await test('mesher bakes biome tints into the terrain geometry', () => {
+  const blocks = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
+  blocks[localIndex(8, 10, 8)] = 2; // grass: climate-sensitive top and side
+  blocks[localIndex(10, 10, 10)] = 1; // stone: must stay neutral
+  const biomes = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE);
+
+  const tintAt = (biome, tile) => {
+    biomes.fill(biome);
+    const mesh = meshChunk(buildPaddedVolume(blocks, () => null), 0, 0, null, biomes).solid;
+    assert.ok(mesh, 'the test chunk should produce geometry');
+    assert.equal(mesh.tints.length, mesh.vertexCount * 3);
+    for (let i = 0; i < mesh.vertexCount; i++) {
+      if (mesh.tiles[i] === tile) {
+        return [mesh.tints[i * 3], mesh.tints[i * 3 + 1], mesh.tints[i * 3 + 2]];
+      }
+    }
+    return null;
+  };
+
+  const desertGrass = tintAt(BIOME.DESERT, TILE.grass_top);
+  const forestGrass = tintAt(BIOME.FOREST, TILE.grass_top);
+  const expected = BIOME_INFO[BIOME.DESERT].grassTint.map((value) => Math.round(value * 128));
+  assert.deepEqual(desertGrass, expected);
+  assert.notDeepEqual(desertGrass, forestGrass, 'biomes must not share one tint');
+  assert.deepEqual(tintAt(BIOME.DESERT, TILE.stone), [128, 128, 128]);
+});
+
+await test('weather follows the camera and switches between rain and snow', () => {
+  const weather = new Weather({ add() {} });
+  const camera = { position: { x: 5, y: 12, z: -3 } };
+  weather.update(camera, 'rain', 1 / 60);
+  assert.equal(weather.mode, 'rain');
+  assert.equal(weather.points.visible, true);
+  assert.deepEqual(
+    [weather.points.position.x, weather.points.position.y, weather.points.position.z],
+    [5, 12, -3],
+  );
+  const startY = weather.positions[1];
+  weather.update(camera, 'snow', 0.5);
+  assert.ok(weather.positions[1] < startY, 'particles fall over time');
+  assert.equal(weather.mode, 'snow');
+  assert.equal(weather.material.size, 0.11, 'snowflakes are larger than raindrops');
+  weather.update(camera, null, 1 / 60);
+  assert.equal(weather.points.visible, false, 'clear biomes show no precipitation');
+  weather.dispose();
+});
+
+await test('animals can be tamed, fed, bred and grow from babies', () => {
+  const world = makeFlatWorld(5);
+  const drops = [];
+  const manager = new EntityManager({
+    scene: { add() {} },
+    world,
+    drops: { spawn(...args) { drops.push(args); } },
+    seed: 13,
+  });
+  const player = { position: { x: 0.5, y: 6, z: 0.5 }, creative: false, dead: false };
+
+  const originalRandom = Math.random;
+  Math.random = () => 0; // guarantee the taming roll succeeds
+  try {
+    const wolf = manager.spawnMob('wolf', 1, 6.02, 1);
+    assert.equal(manager.feed(wolf, 430, player), null, 'a wild wolf ignores meat');
+    assert.equal(manager.feed(wolf, 422, player), 'tamed');
+    assert.equal(wolf.tamed, true);
+    assert.equal(wolf.owner, player);
+    assert.equal(manager.feed(wolf, 430, player), 'loved', 'a tamed wolf can breed');
+  } finally {
+    Math.random = originalRandom;
+  }
+
+  const cowA = manager.spawnMob('cow', 2, 6.02, 2);
+  const cowB = manager.spawnMob('cow', 3, 6.02, 2);
+  cowA.health = 5;
+  assert.equal(manager.feed(cowA, 441, player), 'loved');
+  assert.equal(cowA.health, 7, 'feeding heals the animal');
+  assert.equal(manager.feed(cowB, 441, player), 'bred');
+  const baby = manager.entities.find((entity) => entity.baby && entity.type === 'cow');
+  assert.ok(baby, 'a baby cow should appear');
+  assert.equal(baby.growTimer, ANIMAL_TIMING.growthSeconds);
+  assert.ok(cowA.breedingCooldown > 0 && cowB.breedingCooldown > 0);
+  assert.equal(manager.feed(cowA, 441, player), 'fed', 'cooldown prevents instant breeding');
+  assert.equal(manager.feed(cowB, 1, player), null, 'wrong food is not consumed');
+  baby.growTimer = 1;
+  assert.equal(manager.feed(baby, 441, player), 'grown');
+  assert.equal(baby.baby, false, 'enough food finishes growing the baby');
+});
+
+await test('pets follow and sit, animals panic, lay eggs and regrow wool', () => {
+  const world = makeFlatWorld(5);
+  const drops = [];
+  const manager = new EntityManager({
+    scene: { add() {} },
+    world,
+    drops: { spawn(...args) { drops.push(args); } },
+    seed: 17,
+  });
+  const player = { position: { x: 0.5, y: 6, z: 0.5 }, creative: false, dead: false };
+
+  const pet = manager.spawnMob('wolf', 1, 6.02, 1, { tamed: true, owner: player });
+  assert.equal(pet.isPet, true);
+  pet.position.set(8.5, 6.02, 0.5);
+  pet.update(1 / 30, world, player, manager);
+  assert.equal(pet.state, 'follow');
+  assert.ok(pet.velocity.x < 0, 'a pet walks towards its owner');
+  const movingSpeed = Math.abs(pet.velocity.x);
+  pet.sitting = true;
+  pet.update(1 / 30, world, player, manager);
+  assert.equal(pet.state, 'sit');
+  assert.ok(Math.abs(pet.velocity.x) < movingSpeed, 'a sitting pet slows down');
+
+  const cow = manager.spawnMob('cow', 2, 6.02, 2);
+  cow.hit(1, { position: { x: 0, z: 0 } });
+  cow.position.set(2.5, 6.02, 0.5);
+  cow.update(1 / 30, world, player, manager);
+  assert.equal(cow.state, 'flee');
+  assert.ok(cow.velocity.x < 0, 'panic runs away from the attacker');
+
+  const chicken = manager.spawnMob('chicken', 4, 6.02, 4);
+  drops.length = 0;
+  chicken.eggTimer = 0.01;
+  chicken.update(0.02, world, player, manager);
+  assert.ok(drops.some(([id]) => id === 428), 'chickens lay eggs on a timer');
+
+  const sheep = manager.spawnMob('sheep', 5, 6.02, 5, { sheared: true });
+  sheep.woolTimer = 0.02;
+  sheep.update(0.03, world, player, manager);
+  assert.equal(sheep.sheared, false, 'wool grows back after the timer');
+
+  sheep.sheared = true; // sheared again before the kill
+  drops.length = 0;
+  manager.dropLoot(sheep);
+  assert.equal(
+    drops.some(([id]) => id === 42),
+    false,
+    'a shorn sheep carries no wool when killed',
+  );
+  assert.ok(drops.some(([id]) => id === 434), 'mutton still drops');
+
+  pet.sitting = true;
+  pet.baby = true;
+  pet.growTimer = 12;
+  const data = pet.serialize();
+  const restoredManager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 17 });
+  restoredManager.load([data], player.position, player);
+  const restored = restoredManager.entities[0];
+  assert.equal(restored.tamed, true);
+  assert.equal(restored.owner, player, 'saved pets know their current owner');
+  assert.equal(restored.sitting, true);
+  assert.equal(restored.baby, true);
+  assert.equal(restored.growTimer, 12);
+  assert.equal(restored.serialize().type, 'wolf');
+});
+
+await test('right-clicking an animal with its food feeds it', async () => {
+  globalThis.location ??= { search: '' };
+  const { Game } = await import('../src/game/Game.js');
+  let consumed = 0;
+  const toasts = [];
+  const fed = [];
+  const fakeGame = {
+    player: {
+      eyePosition: { x: 0, y: 2, z: 0 },
+      getDirection: () => ({ x: 0, y: 0, z: -1 }),
+      sneaking: false,
+    },
+    entities: {
+      pick() { return { entity: { type: 'cow' } }; },
+      feed(entity, itemId) {
+        fed.push(itemId);
+        return itemId === 441 ? 'fed' : null;
+      },
+    },
+    isCreative: () => false,
+    inventory: { consumeSelected(count) { consumed += count; } },
+    audio: { playClick() {} },
+    hud: { toast(message) { toasts.push(message); } },
+    onInventoryChanged() {},
+  };
+
+  assert.equal(Game.prototype.feedEntity.call(fakeGame, { id: 441 }), true);
+  assert.deepEqual(fed, [441]);
+  assert.equal(consumed, 1);
+  assert.equal(toasts.length, 1);
+  assert.equal(Game.prototype.feedEntity.call(fakeGame, { id: 1 }), false);
+  assert.equal(consumed, 1, 'refused food stays in the inventory');
+  fakeGame.player.sneaking = true;
+  assert.equal(Game.prototype.feedEntity.call(fakeGame, { id: 441 }), false);
+
+  const picked = { type: 'sheep', sheared: false, position: { x: 0, y: 6, z: 0 } };
+  const shearsGame = {
+    ...fakeGame,
+    player: { ...fakeGame.player, sneaking: false },
+    entities: { pick() { return { entity: picked }; } },
+    drops: { spawn() {} },
+    inventory: { damageSelected() { return false; } },
+  };
+  assert.equal(Game.prototype.useSpecialItem.call(shearsGame, { use: 'shears' }, null), true);
+  assert.equal(picked.sheared, true);
+  assert.equal(picked.woolTimer, ANIMAL_TIMING.woolRegrowSeconds);
 });
 
 console.log(`\n${results.length - failed}/${results.length} tests passed.`);

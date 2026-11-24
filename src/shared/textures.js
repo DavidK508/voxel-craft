@@ -115,6 +115,11 @@ export const TEXTURE_NAMES = [
   'chest_top',
   'chest_side',
   'chest_front',
+  // Biome update: ground cover that changes with climate.
+  'tall_grass',
+  'dandelion',
+  'poppy',
+  'dead_bush',
 ];
 
 export const TILE = Object.freeze(

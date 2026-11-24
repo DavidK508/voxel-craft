@@ -7,11 +7,13 @@ const terrainVertex = /* glsl */`
   attribute float aSky;
   attribute vec2 aHorizon;
   attribute float aLight;
+  attribute vec3 aTint;
   varying vec2 vUv;
   flat varying float vTile;
   varying float vAO;
   varying float vSky;
   varying float vLight;
+  varying vec3 vTint;
   varying vec2 vHorizon;
   varying vec3 vNormal;
   varying float vFogDepth;
@@ -25,6 +27,7 @@ const terrainVertex = /* glsl */`
     vAO = aAO;
     vSky = aSky;
     vLight = aLight;
+    vTint = aTint;
     vHorizon = aHorizon;
     vNormal = normalize(mat3(modelMatrix) * normal);
     // World coordinates keep neighbouring chunks in phase, so a wave never
@@ -61,6 +64,7 @@ const terrainFragment = /* glsl */`
   varying float vAO;
   varying float vSky;
   varying float vLight;
+  varying vec3 vTint;
   varying vec2 vHorizon;
   varying vec3 vNormal;
   varying float vFogDepth;
@@ -108,7 +112,9 @@ const terrainFragment = /* glsl */`
     vec3 light = (uAmbient * 0.5 * skyAmbient
       + uSunColor * sunVis * vSky * (faceShade * 0.85 + sun * 0.15)) * day
       + vec3(1.0, 0.62, 0.28) * blockLight * mix(1.0, 0.45, uDaylight);
-    vec3 color = tex.rgb * light * ao;
+    // Baked biome tint (128 = unchanged, 255 = 2x). Per-tile selection happens
+    // in the mesher, so stone and man-made blocks keep their authored colours.
+    vec3 color = tex.rgb * (vTint * 2.0) * light * ao;
     // Glowstone, lava and portals carry baked block light; a gentle pulse on
     // those cells makes them feel alive while ordinary terrain stays steady.
     color *= 1.0 + 0.05 * (0.5 + 0.5 * sin(uTime * 3.0)) * step(0.35, vLight);

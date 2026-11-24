@@ -11,6 +11,11 @@ import { dimensionAt, nearbyVillages, END_ORIGIN, NETHER_ORIGIN } from '../world
 import { SEA_LEVEL, WORLD_HEIGHT } from '../shared/constants.js';
 import { getSpawnEggId } from '../shared/items.js';
 import { waterSurfaceAt } from '../shared/water.js';
+import { ANIMAL_TIMING, animalDiet } from '../shared/animalFoods.js';
+
+const finite = (value, fallback) => (
+  Number.isFinite(Number(value)) ? Number(value) : fallback
+);
 
 const MAX_ENTITIES = 28;
 const DESPAWN_DISTANCE = 90;
@@ -32,6 +37,7 @@ export class EntityManager {
     this.audio = audio;
     this.seed = seed >>> 0;
     this.entities = [];
+    this.player = null;
     this.time = 0;
     this.spawnTimer = 1.2;
     this.aquaticTimer = 1;
@@ -60,6 +66,7 @@ export class EntityManager {
   }
 
   update(dt, player, { timeOfDay = 0, creative = false, day = true } = {}) {
+    this.player = player;
     this.time += dt;
     const dimension = dimensionAt(player.position.x, player.position.z);
     const max = dimension === 'overworld' ? MAX_ENTITIES : 14;
@@ -116,11 +123,90 @@ export class EntityManager {
     const y = entity.position.y + entity.height * 0.5;
     const z = entity.position.z;
     for (const stack of rollDrops(entity.mob)) {
+      // A shorn sheep carries no wool until it grows back.
+      if (entity.sheared && entity.type === 'sheep' && stack.id === 42) continue;
+      // Babies are too small to yield meat or hides.
+      if (entity.baby) continue;
       this.drops.spawn(stack.id, stack.count, x, y, z);
     }
     // Every creature yields the egg that can summon it again.
     const eggId = getSpawnEggId(entity.type);
     if (eggId !== null) this.drops.spawn(eggId, 1, x, y, z);
+  }
+
+  /**
+   * Feeds an animal with the held item. Returns a short status string for the
+   * HUD, or null when the creature ignores that item (so the player keeps it).
+   */
+  feed(entity, itemId, player = this.player) {
+    if (!entity || entity.dead) return null;
+    const diet = animalDiet(entity.type);
+    if (!diet) return null;
+
+    // Taming items are special: bones are not wolf food, but they earn trust.
+    if (!entity.tamed && diet.tameFood === itemId) {
+      if (Math.random() < (diet.tameChance ?? 1)) {
+        entity.tame(player);
+        return 'tamed';
+      }
+      entity.fleeTimer = 2.5;
+      return 'tame-failed';
+    }
+    if (!diet.foods.includes(itemId)) return null;
+
+    if (entity.baby) {
+      entity.growTimer = Math.max(0, entity.growTimer - ANIMAL_TIMING.feedGrowthBoost);
+      if (entity.growTimer === 0) entity.baby = false;
+      entity.health = Math.min(entity.maxHealth, entity.health + 1);
+      return 'grown';
+    }
+
+    // Wild wolves ignore meat; only bones earn their trust.
+    if (diet.pet && !entity.tamed) return null;
+
+    entity.health = Math.min(entity.maxHealth, entity.health + 2);
+    entity.fleeTimer = 0;
+    if (!diet.breedFoods.includes(itemId) || entity.breedingCooldown > 0) return 'fed';
+    entity.loveTimer = ANIMAL_TIMING.loveSeconds;
+    const partner = this.findMate(entity);
+    if (partner && this.breed(entity, partner)) return 'bred';
+    return 'loved';
+  }
+
+  /** Finds a nearby, similarly fed partner ready to breed with this animal. */
+  findMate(entity) {
+    const diet = animalDiet(entity.type);
+    if (!diet || entity.baby || entity.loveTimer <= 0) return null;
+    return this.entities.find((other) => (
+      other !== entity
+      && !other.dead
+      && other.type === entity.type
+      && !other.baby
+      && other.loveTimer > 0
+      && other.breedingCooldown <= 0
+      && (!diet.pet || (other.tamed && other.owner === entity.owner))
+      && Math.hypot(
+        other.position.x - entity.position.x,
+        other.position.z - entity.position.z,
+      ) <= 8
+    )) ?? null;
+  }
+
+  /** Spawns a baby and puts both parents on a breeding cooldown. */
+  breed(a, b) {
+    if (!a || !b || a.dead || b.dead || a.type !== b.type) return null;
+    if (this.entities.length >= MAX_ENTITIES + AQUATIC_TARGET) return null;
+    a.loveTimer = 0;
+    b.loveTimer = 0;
+    a.breedingCooldown = ANIMAL_TIMING.breedCooldown;
+    b.breedingCooldown = ANIMAL_TIMING.breedCooldown;
+    return this.spawnMob(a.type, a.position.x + 0.5, a.position.y, a.position.z + 0.5, {
+      baby: true,
+      growTimer: ANIMAL_TIMING.growthSeconds,
+      tamed: a.tamed && b.tamed,
+      owner: a.tamed ? a.owner : b.owner,
+      home: a.home ?? b.home,
+    });
   }
 
   /**
@@ -559,7 +645,7 @@ export class EntityManager {
     return this.entities.filter((entity) => !entity.dead).map((entity) => entity.serialize());
   }
 
-  load(list, playerPosition = { x: 0, z: 0 }) {
+  load(list, playerPosition = { x: 0, z: 0 }, player = this.player ?? null) {
     this.clear();
     if (!Array.isArray(list)) return;
     for (const data of list) {
@@ -568,13 +654,24 @@ export class EntityManager {
       if (!Number.isFinite(Number(data.x)) || !Number.isFinite(Number(data.y))) continue;
       const distance = Math.hypot(Number(data.x) - playerPosition.x, Number(data.z) - playerPosition.z);
       if (distance > 110) continue;
+      const baby = Boolean(data.baby);
       this.spawnMob(mob.key, Number(data.x), Number(data.y), Number(data.z), {
-        yaw: Number(data.yaw) || 0,
-        health: Number(data.health) || mob.health,
+        yaw: finite(data.yaw, 0),
+        health: finite(data.health, mob.health),
         tamed: Boolean(data.tamed),
         saddled: Boolean(data.saddled),
         armored: Boolean(data.armored),
         sheared: Boolean(data.sheared),
+        baby,
+        growTimer: finite(data.growTimer, baby ? ANIMAL_TIMING.growthSeconds : 0),
+        breedingCooldown: finite(data.breedingCooldown, 0),
+        loveTimer: finite(data.loveTimer, 0),
+        // A saved chicken needs its lay timer back, otherwise it lays instantly.
+        eggTimer: finite(data.eggTimer, ANIMAL_TIMING.eggSeconds),
+        woolTimer: finite(data.woolTimer, 0),
+        sitting: Boolean(data.sitting),
+        // Owner is runtime-only; the current player adopts saved pets.
+        owner: data.tamed ? player : null,
         home: data.home,
       });
     }

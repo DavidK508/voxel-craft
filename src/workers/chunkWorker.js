@@ -18,7 +18,7 @@ self.onmessage = (event) => {
         biomes: result.biomes,
       }, [result.blocks.buffer, tops.buffer, result.heights.buffer, result.biomes.buffer]);
     } else if (data.type === 'mesh') {
-      const result = meshChunk(data.padded, data.originX, data.originZ, data.tops);
+      const result = meshChunk(data.padded, data.originX, data.originZ, data.tops, data.biomes ?? null);
       const transfer = [];
       if (result.solid) {
         transfer.push(
@@ -30,6 +30,7 @@ self.onmessage = (event) => {
           result.solid.skies.buffer,
           result.solid.horizons.buffer,
           result.solid.lights.buffer,
+          result.solid.tints.buffer,
           result.solid.indices.buffer,
         );
       }
@@ -43,6 +44,7 @@ self.onmessage = (event) => {
           result.water.skies.buffer,
           result.water.horizons.buffer,
           result.water.lights.buffer,
+          result.water.tints.buffer,
           result.water.indices.buffer,
         );
       }

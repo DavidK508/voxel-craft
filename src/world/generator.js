@@ -6,35 +6,11 @@ import {
 import { NoiseField, clamp, hash2i, hash3i, lerp, smoothstep } from '../shared/noise.js';
 import { getDoorId } from '../shared/blocks.js';
 
-export const BIOME = Object.freeze({
-  OCEAN: 0,
-  BEACH: 1,
-  PLAINS: 2,
-  FOREST: 3,
-  DESERT: 4,
-  SNOWY: 5,
-  MOUNTAINS: 6,
-  SWAMP: 7,
-  BIRCH_FOREST: 8,
-  TAIGA: 9,
-  NETHER: 10,
-  END: 11,
-});
+import { BIOME, BIOME_INFO } from '../shared/biomes.js';
 
-export const BIOME_INFO = Object.freeze({
-  0: { name: 'Океан', tree: null, density: 0, surface: 'sand', subsurface: 'sand' },
-  1: { name: 'Пляж', tree: null, density: 0, surface: 'sand', subsurface: 'sand' },
-  2: { name: 'Равнины', tree: 'oak', density: 0.004, surface: 'grass', subsurface: 'dirt' },
-  3: { name: 'Лес', tree: 'oak', density: 0.021, surface: 'grass', subsurface: 'dirt' },
-  4: { name: 'Пустыня', tree: null, density: 0, surface: 'sand', subsurface: 'sandstone' },
-  5: { name: 'Снежные поля', tree: 'spruce', density: 0.008, surface: 'snow', subsurface: 'dirt' },
-  6: { name: 'Горы', tree: 'spruce', density: 0.002, surface: 'stone', subsurface: 'stone' },
-  7: { name: 'Болото', tree: 'oak', density: 0.009, surface: 'grass', subsurface: 'dirt' },
-  8: { name: 'Берёзовый лес', tree: 'birch', density: 0.018, surface: 'grass', subsurface: 'dirt' },
-  9: { name: 'Тайга', tree: 'spruce', density: 0.014, surface: 'grass', subsurface: 'dirt' },
-  10: { name: 'Ад', tree: null, density: 0, surface: 'netherrack', subsurface: 'netherrack' },
-  11: { name: 'Край', tree: null, density: 0, surface: 'end_stone', subsurface: 'end_stone' },
-});
+// Kept as re-exports so existing generators, mob pools and tests can keep
+// importing biome data from the world module.
+export { BIOME, BIOME_INFO };
 
 export const NETHER_THRESHOLD = 900000;
 export const END_THRESHOLD = 900000;
@@ -456,6 +432,28 @@ export class WorldGenerator {
             if (hash2i(wx, wz, this.seed ^ 0x7ee5) >= info.density) continue;
             this.placeTree(blocks, cx, cz, wx, height, wz, info.tree, set, get);
           }
+        }
+      }
+    }
+
+    // Biome ground cover: grass and flowers in lush regions, dry bushes in hot
+    // or frozen ones. Placed after trees so saplings and canopies win the cell.
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        const height = heights[x + z * CHUNK_SIZE];
+        if (height <= SEA_LEVEL) continue;
+        const biome = biomes[x + z * CHUNK_SIZE];
+        const cover = BIOME_INFO[biome].groundCover ?? [];
+        if (!cover.length) continue;
+        const surface = blocks[localIndex(x, height, z)];
+        if (surface !== ID.grass && surface !== ID.snowyGrass && surface !== ID.sand && surface !== ID.redSand) continue;
+        if (blocks[localIndex(x, height + 1, z)] !== ID.air) continue;
+        const wx = baseX + x;
+        const wz = baseZ + z;
+        for (const [plant, chance] of cover) {
+          if (hash2i(wx, wz, this.seed ^ (0x51a3 + plant)) >= chance) continue;
+          blocks[localIndex(x, height + 1, z)] = plant;
+          break;
         }
       }
     }

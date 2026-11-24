@@ -20,6 +20,7 @@ import {
   getWallTorchId,
 } from '../shared/blocks.js';
 import { loadAppearance, saveAppearance } from '../shared/appearance.js';
+import { getBiomeInfo } from '../shared/biomes.js';
 import { CHEST_BLOCK } from '../shared/storage.js';
 import { ContainerStorage } from './ContainerStorage.js';
 import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
@@ -33,6 +34,7 @@ import {
   isTillable,
 } from '../shared/farming.js';
 import { waterSurfaceAt } from '../shared/water.js';
+import { ANIMAL_TIMING } from '../shared/animalFoods.js';
 import { offersForVillager, performTrade } from '../shared/trades.js';
 import {
   GAME_MODE_CREATIVE,
@@ -58,6 +60,7 @@ import { PlayerModel } from '../player/PlayerModel.js';
 import { buildTextureAssets } from '../render/TextureAtlas.js';
 import { createTextureArray, TerrainMaterials } from '../render/TerrainMaterials.js';
 import { Sky } from '../render/Sky.js';
+import { Weather } from '../render/Weather.js';
 import { HUD } from '../ui/HUD.js';
 import { normalizeMapPoint } from '../ui/minimap.js';
 import { InventoryUI } from '../ui/InventoryUI.js';
@@ -81,6 +84,17 @@ const SAVE_INDEX_KEY = 'voxelcraft.worlds.v2';
 const SAVE_PREFIX = 'voxelcraft.save.v2.';
 // Pre-multi-world slot, migrated into the index on first boot.
 const LEGACY_SAVE_KEY = 'voxelcraft.save.v2';
+const BIOME_FOG = new THREE.Color();
+const BIOME_SKY_TOP = new THREE.Color();
+const BIOME_SKY_HORIZON = new THREE.Color();
+const FEED_TOASTS = Object.freeze({
+  grown: 'Малыш подрос',
+  tamed: 'Животное приручено',
+  'tame-failed': 'Животное пока не доверяет',
+  fed: 'Животное накормлено',
+  loved: 'Животное готово к размножению',
+  bred: 'Родился детёныш',
+});
 
 const DIMENSION_LABELS = Object.freeze({
   overworld: 'Верхний мир',
@@ -252,6 +266,7 @@ export class Game {
     this.entities = null;
     this.materials = null;
     this.sky = null;
+    this.weather = new Weather(this.scene);
     this.selection = null;
     this.dimension = 'overworld';
     this.returnPoint = null;
@@ -1981,7 +1996,9 @@ export class Game {
       this.riding = null;
       this.teleportCooldown = 0;
       this.attackCooldown = 0;
-      if (loadedSave?.entities) this.entities.load(loadedSave.entities, this.player.position);
+      if (loadedSave?.entities) {
+        this.entities.load(loadedSave.entities, this.player.position, this.player);
+      }
 
       this.inventoryUI.inventory = this.inventory;
       this.inventoryUI.craftingSlots = new Array(9).fill(null);
@@ -2236,6 +2253,7 @@ export class Game {
       this.sky.dispose();
       this.sky = null;
     }
+    this.weather?.update(this.camera, null, 0);
     if (this.materials) {
       this.materials.dispose();
       this.materials = null;
@@ -2906,6 +2924,19 @@ export class Game {
         this.openTrade(villager);
         return;
       }
+    } else if (this.entities) {
+      // Sneak + right click tells a tamed pet to stay or to follow again.
+      const picked = this.entities.pick(
+        this.player.eyePosition,
+        this.player.getDirection(),
+        4.5,
+      )?.entity;
+      if (picked?.isPet && picked.owner === this.player) {
+        picked.sitting = !picked.sitting;
+        this.audio?.playClick();
+        this.hud?.toast(picked.sitting ? 'Питомец сидит' : 'Питомец идёт за вами');
+        return;
+      }
     }
 
     const stack = this.inventory.selectedStack;
@@ -2917,6 +2948,7 @@ export class Game {
       this.openInventory(2, { cooking: true, pan: true });
       return;
     }
+    if (this.feedEntity(item)) return;
     if (this.useFarmingItem(item, target)) return;
 
     if (item.use && this.useSpecialItem(item, target)) return;
@@ -2928,6 +2960,24 @@ export class Game {
     if (item.placeBlock) {
       this.placeBlock(target, item.placeBlock);
     }
+  }
+
+  /** Feeds the creature under the crosshair; returns true if an item was used. */
+  feedEntity(item) {
+    if (!this.entities || this.player.sneaking) return false;
+    const picked = this.entities.pick(
+      this.player.eyePosition,
+      this.player.getDirection(),
+      4.6,
+    )?.entity;
+    if (!picked) return false;
+    const result = this.entities.feed(picked, item.id, this.player);
+    if (!result) return false;
+    if (!this.isCreative()) this.inventory.consumeSelected(1);
+    this.audio?.playClick();
+    this.hud?.toast(FEED_TOASTS[result] ?? 'Животное накормлено');
+    this.onInventoryChanged?.();
+    return true;
   }
 
   /** Handles flint and steel, buckets, saddles, shears, eggs and ender eyes. */
@@ -2952,6 +3002,7 @@ export class Game {
       )?.entity;
       if (!picked || picked.type !== 'sheep' || picked.sheared) return false;
       picked.sheared = true;
+      picked.woolTimer = ANIMAL_TIMING.woolRegrowSeconds;
       const count = 1 + Math.floor(Math.random() * 2);
       for (let i = 0; i < count; i++) {
         this.drops?.spawn(42, 1, picked.position.x, picked.position.y + 0.6, picked.position.z);
@@ -3694,8 +3745,30 @@ export class Game {
     const environment = this.sky.update(this.camera, this.timeOfDay, dt);
     const dimension = dimensionAt(this.player.position.x, this.player.position.z);
     this.dimension = dimension;
+    let weatherMode = null;
     if (dimension === 'overworld') {
       this.sky.clouds.visible = true;
+      // Biomes tint the local atmosphere without erasing the day/night cycle:
+      // forests get a green haze, deserts a warm one, snow a pale cold sky.
+      const biomeId = this.world.getBiomeIdAt?.(
+        Math.floor(this.player.position.x),
+        Math.floor(this.player.position.z),
+      );
+      const info = getBiomeInfo(biomeId);
+      BIOME_FOG.setHex(info.fog);
+      BIOME_SKY_TOP.setHex(info.skyTop);
+      BIOME_SKY_HORIZON.setHex(info.skyHorizon);
+      environment.fogColor.lerp(BIOME_FOG, 0.35);
+      this.sky.uniforms.uTop.value.lerp(BIOME_SKY_TOP, 0.25);
+      this.sky.uniforms.uHorizon.value.lerp(BIOME_SKY_HORIZON, 0.32);
+      const sheltered = this.world.isSolidAt?.(
+        Math.floor(this.player.position.x),
+        Math.floor(this.player.position.y) + 2,
+        Math.floor(this.player.position.z),
+      );
+      if (info.weather !== 'none' && environment.daylight > 0.18 && !sheltered) {
+        weatherMode = info.weather;
+      }
     } else {
       // The Nether and the End have no weather or sun; tint the sky and fog.
       const nether = dimension === 'nether';
@@ -3708,6 +3781,7 @@ export class Game {
       environment.fogColor.setHex(nether ? 0x57150a : 0x241236);
       environment.daylight = nether ? 0.5 : 0.65;
     }
+    this.weather?.update(this.camera, weatherMode, dt);
     this.materials.update({
       fogColor: environment.fogColor,
       sunDir: environment.sunDir,

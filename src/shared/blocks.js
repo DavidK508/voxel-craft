@@ -514,6 +514,34 @@ const defs = [
     drops: [{ id: CHEST_BLOCK, count: 1 }], interactive: 'chest',
     mergeSides: false,
   },
+
+  // --- Biome update ---------------------------------------------------------
+  // Cross-shaped ground cover. Dense patches are generated per biome, and the
+  // mesher emits them as billboards just like the crop stages.
+  {
+    id: 201, key: 'tall_grass', name: 'Высокая трава', hardness: 0,
+    faceTiles: all(TILE.tall_grass), drops: [{ id: 533, count: 1, chance: 0.35 }],
+    solid: false, opaque: false, cutout: true, renderLayer: 'cutout',
+    mergeSides: false, crossHeight: 0.85,
+  },
+  {
+    id: 202, key: 'dandelion', name: 'Одуванчик', hardness: 0,
+    faceTiles: all(TILE.dandelion), drops: [{ id: 202, count: 1 }],
+    solid: false, opaque: false, cutout: true, renderLayer: 'cutout',
+    mergeSides: false, crossHeight: 0.7,
+  },
+  {
+    id: 203, key: 'poppy', name: 'Мак', hardness: 0,
+    faceTiles: all(TILE.poppy), drops: [{ id: 203, count: 1 }],
+    solid: false, opaque: false, cutout: true, renderLayer: 'cutout',
+    mergeSides: false, crossHeight: 0.7,
+  },
+  {
+    id: 204, key: 'dead_bush', name: 'Сухой куст', hardness: 0,
+    faceTiles: all(TILE.dead_bush), drops: [{ id: 400, count: 1 }],
+    solid: false, opaque: false, cutout: true, renderLayer: 'cutout',
+    mergeSides: false, crossHeight: 0.6,
+  },
 ];
 
 // Multi-block and powered states are encoded directly in the block id, so the

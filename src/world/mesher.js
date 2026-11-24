@@ -9,6 +9,7 @@ import {
 } from '../shared/constants.js';
 import { BLOCKS, BLOCK_DEFS, HORIZONTAL_OFFSETS, isRenderable } from '../shared/blocks.js';
 import { TILE } from '../shared/textures.js';
+import { BIOME, BIOME_INFO } from '../shared/biomes.js';
 
 const PAD_STRIDE_Z = PAD_X;
 const PAD_STRIDE_Y = PAD_X * PAD_Z;
@@ -39,9 +40,30 @@ function isOpaqueAt(padded, x, y, z) {
 // Crops still use crossed billboards. Everything else with a non-cube silhouette
 // declares `customShape` in its block definition and is emitted after the
 // greedy cube pass.
-const CROSS_IDS = new Set([64, 65, 66, 67]);
+const CROSS_IDS = new Set([64, 65, 66, 67, 201, 202, 203, 204]);
 const CUSTOM_IDS = new Set(BLOCK_DEFS.filter((block) => block.customShape).map((block) => block.id));
 const FENCE_ID = 68;
+
+// Tint multipliers are baked per vertex (128 = unchanged) so the terrain shader
+// needs no biome lookup. Only climate-sensitive tiles are tinted: stone, ores,
+// planks and devices keep their authored colours everywhere.
+const NEUTRAL_TINT = [1, 1, 1];
+const tintScratch = [1, 1, 1];
+const GRASS_TILES = [TILE.grass_top, TILE.grass_side, TILE.tall_grass, TILE.dandelion, TILE.poppy];
+const LEAVES_TILES = [TILE.oak_leaves, TILE.birch_leaves, TILE.spruce_leaves];
+const WATER_TILES = [TILE.water];
+
+function tintForTile(tile, biomeId) {
+  const info = BIOME_INFO[biomeId] ?? BIOME_INFO[BIOME.PLAINS];
+  let tint = NEUTRAL_TINT;
+  if (GRASS_TILES.includes(tile)) tint = info.grassTint;
+  else if (LEAVES_TILES.includes(tile)) tint = info.leavesTint;
+  else if (WATER_TILES.includes(tile)) tint = info.waterTint;
+  tintScratch[0] = tint[0];
+  tintScratch[1] = tint[1];
+  tintScratch[2] = tint[2];
+  return tintScratch;
+}
 
 /**
  * Flood-fills block light from emissive blocks (torches, glowstone, furnaces,
@@ -104,7 +126,7 @@ function lightAtIndex(light, x, y, z) {
 }
 
 /** Adds one axis-aligned quad using the same UV convention as greedy faces. */
-function addFace(bucket, axis, sign, fixed, u0, u1, v0, v1, tile, sky, light) {
+function addFace(bucket, axis, sign, fixed, u0, u1, v0, v1, tile, sky, light, tint = NEUTRAL_TINT) {
   const uAxis = axis === 0 ? 2 : 0;
   const vAxis = axis === 1 ? 2 : 1;
   const corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
@@ -124,18 +146,18 @@ function addFace(bucket, axis, sign, fixed, u0, u1, v0, v1, tile, sky, light) {
   // geometric winding is reversed on those two axes. Flip it to keep the
   // generated boxes front-facing from the outside.
   const winding = sign * (axis === 2 ? 1 : -1);
-  bucket.addQuad(points, normal, uvs, tile, 255, sky, 0, 0, winding, light);
+  bucket.addQuad(points, normal, uvs, tile, 255, sky, 0, 0, winding, light, tint);
 }
 
 /** Emits a textured box. Tiles follow the block faceTiles order. */
-function emitBox(bucket, box, tiles, sky, light) {
+function emitBox(bucket, box, tiles, sky, light, tint = NEUTRAL_TINT) {
   const [x0, y0, z0, x1, y1, z1] = box;
-  addFace(bucket, 1, 1, y1, x0, x1, z0, z1, tiles[0], sky, light);
-  addFace(bucket, 1, -1, y0, x0, x1, z0, z1, tiles[1], sky, light);
-  addFace(bucket, 0, 1, x1, z0, z1, y0, y1, tiles[2], sky, light);
-  addFace(bucket, 0, -1, x0, z0, z1, y0, y1, tiles[3], sky, light);
-  addFace(bucket, 2, 1, z1, x0, x1, y0, y1, tiles[4], sky, light);
-  addFace(bucket, 2, -1, z0, x0, x1, y0, y1, tiles[5], sky, light);
+  addFace(bucket, 1, 1, y1, x0, x1, z0, z1, tiles[0], sky, light, tint);
+  addFace(bucket, 1, -1, y0, x0, x1, z0, z1, tiles[1], sky, light, tint);
+  addFace(bucket, 0, 1, x1, z0, z1, y0, y1, tiles[2], sky, light, tint);
+  addFace(bucket, 0, -1, x0, z0, z1, y0, y1, tiles[3], sky, light, tint);
+  addFace(bucket, 2, 1, z1, x0, x1, y0, y1, tiles[4], sky, light, tint);
+  addFace(bucket, 2, -1, z0, x0, x1, y0, y1, tiles[5], sky, light, tint);
 }
 
 /**
@@ -169,7 +191,7 @@ function emitDirectedBox(bucket, x, y, z, facing, side0, side1, forward0, forwar
 }
 
 /** A two-sided diagonal billboard, used for flames. */
-function emitBillboard(bucket, ax, az, bx, bz, y0, y1, tile, sky, light) {
+function emitBillboard(bucket, ax, az, bx, bz, y0, y1, tile, sky, light, tint = NEUTRAL_TINT) {
   const dx = bx - ax;
   const dz = bz - az;
   const length = Math.hypot(dx, dz) || 1;
@@ -180,7 +202,7 @@ function emitBillboard(bucket, ax, az, bx, bz, y0, y1, tile, sky, light) {
   ];
   const uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
   for (const sign of [1, -1]) {
-    bucket.addQuad(points, [nx * sign, 0, nz * sign], uvs, tile, 255, sky, 0, 0, sign, light);
+    bucket.addQuad(points, [nx * sign, 0, nz * sign], uvs, tile, 255, sky, 0, 0, sign, light, tint);
   }
 }
 
@@ -434,7 +456,7 @@ function emitCustom(bucket, padded, x, y, z, block, lightMap, tops) {
  * Plants and fences are flat crossed billboards. Both sides are emitted because
  * the terrain material is front-face only.
  */
-function emitCross(bucket, x, y, z, block, lightMap, tops) {
+function emitCross(bucket, x, y, z, block, lightMap, tops, tint = NEUTRAL_TINT) {
   const tile = block.faceTiles[0];
   const sky = computeSky(tops, x, z, y + 1);
   const light = lightAtIndex(lightMap, x, y, z);
@@ -471,6 +493,7 @@ function emitCross(bucket, x, y, z, block, lightMap, tops) {
         0,
         sign,
         light,
+        tint,
       );
     }
   }
@@ -665,14 +688,18 @@ class Bucket {
     this.skies = [];
     this.horizons = [];
     this.lights = [];
+    this.tints = [];
     this.indices = [];
     this.vertexCount = 0;
   }
 
-  addQuad(points, normal, uvs, tile, aoPack, skyLevel, hPlus, hMinus, sign, lightLevel = 0) {
+  addQuad(points, normal, uvs, tile, aoPack, skyLevel, hPlus, hMinus, sign, lightLevel = 0, tint = NEUTRAL_TINT) {
     const base = this.vertexCount;
     const sky = skyLevel * 85;
     const light = Math.max(0, Math.min(15, lightLevel)) * 17;
+    const tr = Math.max(0, Math.min(255, Math.round((tint[0] ?? 1) * 128)));
+    const tg = Math.max(0, Math.min(255, Math.round((tint[1] ?? 1) * 128)));
+    const tb = Math.max(0, Math.min(255, Math.round((tint[2] ?? 1) * 128)));
     for (let i = 0; i < 4; i++) {
       const p = points[i];
       this.positions.push(p[0], p[1], p[2]);
@@ -683,6 +710,7 @@ class Bucket {
       this.skies.push(sky);
       this.horizons.push(hPlus, hMinus);
       this.lights.push(light);
+      this.tints.push(tr, tg, tb);
     }
     if (sign > 0) {
       this.indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
@@ -703,6 +731,7 @@ class Bucket {
       skies: new Uint8Array(this.skies),
       horizons: new Uint8Array(this.horizons),
       lights: new Uint8Array(this.lights),
+      tints: new Uint8Array(this.tints),
       indices: new Uint32Array(this.indices),
       vertexCount: this.vertexCount,
     };
@@ -718,7 +747,7 @@ class Bucket {
  * never merge across a lighting discontinuity. Faces with non-tileable vertical
  * detail (grass sides) are prevented from merging vertically.
  */
-export function meshChunk(padded, originX, originZ, extTops) {
+export function meshChunk(padded, originX, originZ, extTops, biomes = null) {
   const solid = new Bucket();
   const water = new Bucket();
   const mask = new Uint32Array(WORLD_HEIGHT * CHUNK_SIZE);
@@ -768,6 +797,7 @@ export function meshChunk(padded, originX, originZ, extTops) {
 
             const block = BLOCKS[blockId];
             const tile = block.faceTiles[faceIndex];
+            const biome = biomes ? (biomes[pos[0] + pos[2] * CHUNK_SIZE] ?? BIOME.PLAINS) : BIOME.PLAINS;
             const aoPack = computeAO(padded, pos[0], pos[1], pos[2], axis, sign, uAxis, vAxis);
             const skyLevel = faceSky(tops, pos[0], pos[1], pos[2], axis, sign);
             faceHorizon(tops, pos[0], pos[1], pos[2], axis, sign, horizon);
@@ -775,13 +805,15 @@ export function meshChunk(padded, originX, originZ, extTops) {
             const hMinus = Math.round(horizon[1] * 31);
             const canMergeV = block.mergeSides || axis === 1 ? 1 : 0;
             // body = tile * 2048 + aoPack * 8 + skyLevel * 2 + canMergeV
-            //      + hPlus * 262144 + hMinus * 8388608
+            //      + hPlus * 262144 + hMinus * 8388608 + biome * 268435456
             // Tiles need seven bits: the atlas now has more than 64 layers and
             // truncating them made late tiles (bed, redstone) render as other
             // blocks. Horizons keep five bits each; the lost precision is
-            // invisible after the byte conversion in the shader.
+            // invisible after the byte conversion in the shader. Four high bits
+            // hold the biome so quads never merge across a colour boundary.
             mask[u + v * stride] = 1 + (tile << 11) + (aoPack << 3)
-              + (skyLevel << 1) + canMergeV + (hPlus << 18) + (hMinus << 23);
+              + (skyLevel << 1) + canMergeV + (hPlus << 18) + (hMinus << 23)
+              + (biome << 28);
             const emitted = block.light ?? 0;
             lightMask[u + v * stride] = Math.max(
               emitted,
@@ -816,13 +848,15 @@ export function meshChunk(padded, originX, originZ, extTops) {
             }
 
             const body = key - 1;
-            const skyLevel = (body >> 1) & 3;
-            const aoPack = (body >> 3) & 255;
-            const tile = (body >> 11) & 127;
-            const hPlus = (body >> 18) & 31;
-            const hMinus = (body >> 23) & 31;
+            const skyLevel = (body >>> 1) & 3;
+            const aoPack = (body >>> 3) & 255;
+            const tile = (body >>> 11) & 127;
+            const hPlus = (body >>> 18) & 31;
+            const hMinus = (body >>> 23) & 31;
+            const tintBiome = (body >>> 28) & 15;
             const hPlusByte = Math.round(hPlus * (255 / 31));
             const hMinusByte = Math.round(hMinus * (255 / 31));
+            const faceTint = tintForTile(tile, tintBiome);
 
             // Recover the actual block at the first cell for bucket selection.
             const first = [0, 0, 0];
@@ -860,7 +894,7 @@ export function meshChunk(padded, originX, originZ, extTops) {
             normal[1] = 0;
             normal[2] = 0;
             normal[axis] = sign;
-            bucket.addQuad(points, normal, uvs, tile, aoPack, skyLevel, hPlusByte, hMinusByte, sign, cellLight);
+            bucket.addQuad(points, normal, uvs, tile, aoPack, skyLevel, hPlusByte, hMinusByte, sign, cellLight, faceTint);
 
             for (let yy = 0; yy < height; yy++) {
               for (let xx = 0; xx < width; xx++) {
@@ -880,8 +914,12 @@ export function meshChunk(padded, originX, originZ, extTops) {
     for (let z = 0; z < CHUNK_SIZE; z++) {
       for (let x = 0; x < CHUNK_SIZE; x++) {
         const id = padded[padIndex(x, y, z)];
-        if (CROSS_IDS.has(id)) emitCross(solid, x, y, z, BLOCKS[id], blockLight, tops);
-        else if (CUSTOM_IDS.has(id)) emitCustom(solid, padded, x, y, z, BLOCKS[id], blockLight, tops);
+        const biome = biomes ? (biomes[x + z * CHUNK_SIZE] ?? BIOME.PLAINS) : BIOME.PLAINS;
+        if (CROSS_IDS.has(id)) {
+          emitCross(solid, x, y, z, BLOCKS[id], blockLight, tops, tintForTile(BLOCKS[id].faceTiles[0], biome));
+        } else if (CUSTOM_IDS.has(id)) {
+          emitCustom(solid, padded, x, y, z, BLOCKS[id], blockLight, tops);
+        }
       }
     }
   }

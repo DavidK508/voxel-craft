@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getBlock } from '../shared/blocks.js';
 import { SEA_LEVEL } from '../shared/constants.js';
+import { ANIMAL_TIMING, animalDiet } from '../shared/animalFoods.js';
 import { isInWater, isWaterBlock, waterSurfaceAt } from '../shared/water.js';
 import { buildMobModel } from './models.js';
 
@@ -57,6 +58,16 @@ export class Entity {
     this.armored = options.armored ?? false;
     this.sheared = options.sheared ?? false;
     this.ridden = false;
+    this.owner = options.owner ?? null;
+    this.baby = options.baby ?? false;
+    this.growTimer = options.growTimer ?? (this.baby ? ANIMAL_TIMING.growthSeconds : 0);
+    this.breedingCooldown = options.breedingCooldown ?? 0;
+    this.loveTimer = options.loveTimer ?? 0;
+    this.eggTimer = options.eggTimer ?? ANIMAL_TIMING.eggSeconds * (0.6 + Math.random() * 0.8);
+    this.woolTimer = options.woolTimer ?? 0;
+    this.sitting = options.sitting ?? false;
+    this.panicX = options.panicX ?? null;
+    this.panicZ = options.panicZ ?? null;
     this.home = options.home ? { x: options.home.x, z: options.home.z } : null;
     this.state = 'idle';
     this.timer = 0.5 + Math.random() * 2.5;
@@ -87,6 +98,10 @@ export class Entity {
 
   get center() {
     return new THREE.Vector3(this.position.x, this.position.y + this.height / 2, this.position.z);
+  }
+
+  get isPet() {
+    return this.tamed && !!animalDiet(this.type)?.pet;
   }
 
   collides(world, x, y, z) {
@@ -221,6 +236,25 @@ export class Entity {
     this.hurtTime = Math.max(0, this.hurtTime - dt);
     this.provoked = Math.max(0, this.provoked - dt);
     if (this.fleeTimer > 0) this.fleeTimer = Math.max(0, this.fleeTimer - dt);
+    this.breedingCooldown = Math.max(0, this.breedingCooldown - dt);
+    this.loveTimer = Math.max(0, this.loveTimer - dt);
+
+    if (this.baby && this.growTimer > 0) {
+      this.growTimer = Math.max(0, this.growTimer - dt);
+      if (this.growTimer === 0) this.baby = false;
+    }
+    if (this.woolTimer > 0) {
+      this.woolTimer = Math.max(0, this.woolTimer - dt);
+      if (this.woolTimer === 0 && this.sheared) this.sheared = false;
+    }
+    const diet = animalDiet(this.type);
+    if (diet?.laysEggs && !this.baby && manager?.drops) {
+      this.eggTimer -= dt;
+      if (this.eggTimer <= 0) {
+        this.eggTimer = ANIMAL_TIMING.eggSeconds * (0.6 + Math.random() * 0.8);
+        manager.drops.spawn(428, 1, this.position.x, this.position.y + 0.35, this.position.z);
+      }
+    }
 
     if (!world.isChunkLoadedAt(this.position.x, this.position.z)) {
       this.syncModel(dt);
@@ -353,10 +387,22 @@ export class Entity {
       }
     } else if (this.fleeTimer > 0) {
       this.state = 'flee';
-      this.yaw = Math.atan2(dx, dz);
+      // Panic runs away from whatever hurt it, not always from the player.
+      const px = this.panicX ?? player.position.x;
+      const pz = this.panicZ ?? player.position.z;
+      this.yaw = Math.atan2(this.position.x - px, this.position.z - pz);
       moveX = -Math.sin(this.yaw);
       moveZ = -Math.cos(this.yaw);
       speed *= 1.35;
+    } else if (this.isPet && this.owner) {
+      this.state = this.sitting ? 'sit' : 'follow';
+      this.yaw = Math.atan2(-dx, -dz);
+      if (!this.sitting && distance > ANIMAL_TIMING.followDistance) {
+        moveX = -Math.sin(this.yaw);
+        moveZ = -Math.cos(this.yaw);
+        speed *= 1.45;
+        if (distance > ANIMAL_TIMING.leashDistance) speed *= 1.6;
+      }
     } else {
       this.timer -= dt;
       if (this.timer <= 0) {
@@ -462,7 +508,10 @@ export class Entity {
 
     if (this.fleeTimer > 0 && Math.hypot(dx, dz) > 0.01) {
       this.state = 'flee';
-      this.yaw = Math.atan2(dx, dz);
+      this.yaw = Math.atan2(
+        this.position.x - (this.panicX ?? this.position.x + dx),
+        this.position.z - (this.panicZ ?? this.position.z + dz),
+      );
       return {
         x: -Math.sin(this.yaw),
         z: -Math.cos(this.yaw),
@@ -769,9 +818,12 @@ export class Entity {
         this.model.rods[i].rotation.y = (i % 2 ? -1 : 1) * (this.time * (1.4 + i * 0.1) + i);
       }
     }
+    const baseScale = this.baby ? 0.55 : 1;
     if (this.type === 'creeper') {
       const pulse = this.fuse > 0 ? 1 + Math.sin(this.time * 24) * this.fuse * 0.06 : 1;
-      group.scale.setScalar(pulse);
+      group.scale.setScalar(baseScale * pulse);
+    } else {
+      group.scale.setScalar(baseScale);
     }
     // Hurt feedback: keep the existing visibility flash and add a small jolt.
     const flash = this.hurtTime > 0;
@@ -786,7 +838,11 @@ export class Entity {
     if (attacker) {
       if (this.kind === 'guardian') this.provoked = Math.max(this.provoked, 20);
       else if (this.kind === 'neutral' || this.hostile) this.provoked = 8;
-      else this.fleeTimer = 5;
+      else {
+        this.fleeTimer = 5;
+        this.panicX = attacker.position?.x ?? null;
+        this.panicZ = attacker.position?.z ?? null;
+      }
     }
     if (this.health <= 0) {
       this.dead = true;
@@ -794,9 +850,11 @@ export class Entity {
     return this.dead;
   }
 
-  tame() {
+  tame(owner = null) {
     this.tamed = true;
+    this.owner = owner;
     this.fleeTimer = 0;
+    this.sitting = false;
   }
 
   serialize() {
@@ -811,6 +869,13 @@ export class Entity {
       saddled: this.saddled,
       armored: this.armored,
       sheared: this.sheared,
+      baby: this.baby,
+      growTimer: this.growTimer,
+      breedingCooldown: this.breedingCooldown,
+      loveTimer: this.loveTimer,
+      eggTimer: this.eggTimer,
+      woolTimer: this.woolTimer,
+      sitting: this.sitting,
       home: this.home ? { x: this.home.x, z: this.home.z } : null,
     };
   }
