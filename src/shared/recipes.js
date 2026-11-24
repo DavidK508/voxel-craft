@@ -1,4 +1,4 @@
-import { ITEM_IDS } from './items.js';
+import { ITEM_IDS, SPEAR_IDS } from './items.js';
 
 const WOOD = [5];
 const STONE = [4];
@@ -26,6 +26,19 @@ for (const set of materialSets) {
     { id: `${set.key}_sword`, pattern: ['M', 'M', 'S'], key: { M: set.material, S: 400 }, result: { id: set.sword, count: 1 } },
   );
 }
+
+const spearMaterials = {
+  wood: WOOD, stone: STONE, iron: IRON,
+  diamond: DIAMOND, gold: GOLD, netherite: NETHERITE,
+};
+// The lower blade is deliberately offset: a centred ['M','M','S'] shape would
+// collapse into the existing sword recipe after the matcher trims empty edges.
+const spearRecipes = Object.entries(SPEAR_IDS).map(([material, id]) => ({
+  id: `${material}_spear`,
+  pattern: [' M ', ' M ', 'MS '],
+  key: { M: spearMaterials[material], S: 400 },
+  result: { id, count: 1 },
+}));
 
 const hoeRecipes = [
   { id: 'wooden_hoe', pattern: ['MM', ' S', ' S'], key: { M: 5, S: 400 }, result: { id: ITEM_IDS.WOODEN_HOE, count: 1 } },
@@ -87,6 +100,18 @@ export const RECIPES = Object.freeze([
   { id: 'torch', shapeless: [{ any: [401] }, { any: [400] }], result: { id: 63, count: 4 } },
   // A bed is three wool above three planks, just like Minecraft.
   { id: 'bed', pattern: ['WWW', 'PPP'], key: { W: 42, P: 5 }, result: { id: 69, count: 1 } },
+  // Ranged weapons: arrows from flint, wooden sticks and feathers.
+  {
+    id: 'arrow',
+    shapeless: [{ any: [410] }, { any: [400] }, { any: [421] }],
+    result: { id: ITEM_IDS.ARROW, count: 4 },
+  },
+  {
+    id: 'bow',
+    pattern: [' S ', 'S T', ' S '],
+    key: { S: 400, T: 423 },
+    result: { id: ITEM_IDS.BOW, count: 1 },
+  },
   // Doors and Redstone mechanisms.
   { id: 'oak_door', pattern: ['PP', 'PP', 'PP'], key: { P: 5 }, result: { id: 81, count: 1 } },
   { id: 'lever', shapeless: [{ any: [400] }, { any: [4] }], result: { id: 97, count: 1 } },
@@ -100,6 +125,7 @@ export const RECIPES = Object.freeze([
   { id: 'sticky_piston', shapeless: [{ any: [151] }, { any: [448] }], result: { id: 169, count: 1 } },
   ...armorRecipes,
   ...toolRecipes,
+  ...spearRecipes,
   ...hoeRecipes,
 ]);
 

@@ -172,6 +172,20 @@ export class Inventory {
     if (slot.count <= 0) this.slots[this.selected] = null;
   }
 
+  /** Consumes a specific item from any slot (used for arrows and ingredients). */
+  consumeItem(id, count = 1) {
+    let remaining = count;
+    for (let i = 0; i < INVENTORY_SIZE && remaining > 0; i++) {
+      const slot = this.slots[i];
+      if (!slot || slot.id !== id) continue;
+      const move = Math.min(slot.count, remaining);
+      slot.count -= move;
+      remaining -= move;
+      if (slot.count <= 0) this.slots[i] = null;
+    }
+    return remaining === 0;
+  }
+
   damageSelected(amount = 1) {
     const slot = this.slots[this.selected];
     if (!slot || slot.durability === undefined) return false;

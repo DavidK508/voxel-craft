@@ -66,6 +66,9 @@ export const ITEM_IDS = Object.freeze({
   SPIDER_FANG: 476,
   WOLF_FUR: 477,
   CAMEL_HIDE: 478,
+  // Ranged weapons use free ids below the armour range.
+  ARROW: 479,
+  BOW: 480,
   LEATHER_HELMET: 500,
   LEATHER_CHESTPLATE: 501,
   LEATHER_LEGGINGS: 502,
@@ -117,6 +120,28 @@ for (const material of TOOL_MATERIALS) {
     });
   }
 }
+
+// Spears live in their own id range (324+) so every saved tool id stays put.
+// They trade raw damage for a longer reach than a sword.
+export const SPEAR_IDS = Object.freeze(Object.fromEntries(
+  TOOL_MATERIALS.map((material, index) => [material.key, 324 + index]),
+));
+TOOL_MATERIALS.forEach((material, index) => {
+  toolDefs.push({
+    id: 324 + index,
+    key: `${material.key}_spear`,
+    name: `${material.name.replace(/(ый|ой)$/, 'ое')} копьё`,
+    stack: 1,
+    icon: 'spear',
+    iconMaterial: material.key,
+    tool: {
+      type: 'spear',
+      tier: material.tier,
+      speed: material.speed,
+      durability: Math.round(material.durability * 0.8),
+    },
+  });
+});
 
 const ARMOR_MATERIALS = [
   {
@@ -259,6 +284,11 @@ const materialDefs = [
   { id: 476, key: 'spider_fang', name: 'Клык паука', stack: 64, icon: 'spider_fang' },
   { id: 477, key: 'wolf_fur', name: 'Волчья шерсть', stack: 64, icon: 'wolf_fur' },
   { id: 478, key: 'camel_hide', name: 'Верблюжья кожа', stack: 64, icon: 'camel_hide' },
+  { id: ITEM_IDS.ARROW, key: 'arrow', name: 'Стрела', stack: 64, icon: 'arrow' },
+  {
+    id: ITEM_IDS.BOW, key: 'bow', name: 'Лук', stack: 1, icon: 'bow',
+    tool: { type: 'bow', tier: 1, speed: 1, durability: 384 },
+  },
 ];
 
 /** One egg per creature. Killing any mob drops the egg that summons it again. */

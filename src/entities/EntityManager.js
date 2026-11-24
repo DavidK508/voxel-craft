@@ -7,8 +7,9 @@ import {
   rollDrops,
   spawnablePassive,
 } from './mobs.js';
+import { HORIZONTAL_OFFSETS, decodeState } from '../shared/blocks.js';
 import { dimensionAt, nearbyVillages, END_ORIGIN, NETHER_ORIGIN } from '../world/generator.js';
-import { SEA_LEVEL, WORLD_HEIGHT } from '../shared/constants.js';
+import { PLAYER_HEIGHT, PLAYER_WIDTH, SEA_LEVEL, WORLD_HEIGHT } from '../shared/constants.js';
 import { getSpawnEggId } from '../shared/items.js';
 import { waterSurfaceAt } from '../shared/water.js';
 import { ANIMAL_TIMING, animalDiet } from '../shared/animalFoods.js';
@@ -28,6 +29,8 @@ const SUN_DAMAGE_PER_SECOND = 6;
 const STRANDED_GRACE_SECONDS = 2.5;
 const STRANDED_DAMAGE_PER_SECOND = 4;
 const AQUATIC_TARGET = 6;
+const DOOR_HOLD_SECONDS = 2.5;
+const BED_SEARCH_RADIUS = 15;
 
 export class EntityManager {
   constructor({ scene, world, drops, seed, audio = null }) {
@@ -45,11 +48,16 @@ export class EntityManager {
     this.villageCache = [];
     this.villageCacheTimer = 0;
     this.golemCooldowns = new Map();
+    this.openDoors = new Map();
+    this.bedClaims = new Map();
+    this.day = true;
+    this.timeOfDay = 6000;
     this.bossRespawnAt = 0;
     this.pigSeedAt = 0;
     this.onAttack = null;
     this.onBossSpawn = null;
     this.onBossDefeat = null;
+    this.onDoorRequest = null;
   }
 
   add(entity) {
@@ -67,6 +75,8 @@ export class EntityManager {
 
   update(dt, player, { timeOfDay = 0, creative = false, day = true } = {}) {
     this.player = player;
+    this.day = day;
+    this.timeOfDay = timeOfDay;
     this.time += dt;
     const dimension = dimensionAt(player.position.x, player.position.z);
     const max = dimension === 'overworld' ? MAX_ENTITIES : 14;
@@ -94,6 +104,18 @@ export class EntityManager {
       this.updateStranding(entity, dt);
     }
 
+    // Creatures share the same space: separate overlapping bodies after every
+    // AI step so nothing can walk straight through the player or a neighbour.
+    this.resolveEntityCollisions(player);
+    this.updateDoorTimers(player);
+
+    this.villageTimer -= dt;
+    if (this.villageTimer <= 0) {
+      this.villageTimer = 2.5;
+      this.updateVillagerBeds();
+      this.trySpawnVillagers(player);
+    }
+
     this.ensureNetherLife(player, dimension);
     this.ensureEndLife(player, dimension);
     this.aquaticTimer -= dt;
@@ -110,11 +132,6 @@ export class EntityManager {
       if (this.entities.length < max) this.trySpawn(player, dimension, day);
     }
 
-    this.villageTimer -= dt;
-    if (this.villageTimer <= 0) {
-      this.villageTimer = 2.5;
-      this.trySpawnVillagers(player);
-    }
   }
 
   dropLoot(entity) {
@@ -243,8 +260,159 @@ export class EntityManager {
   removeAt(index) {
     const entity = this.entities[index];
     if (!entity) return;
+    this.releaseBed(entity);
     entity.dispose();
     this.entities.splice(index, 1);
+  }
+
+  /** Asks the game to swing a door open, keeping it open while traffic is near. */
+  requestDoor(x, y, z, open = true) {
+    if (!this.onDoorRequest) return;
+    const key = `${x},${y},${z}`;
+    if (!open) {
+      this.openDoors.delete(key);
+      this.onDoorRequest(x, y, z, false);
+      return;
+    }
+    if (this.openDoors.has(key)) {
+      this.openDoors.set(key, this.time + DOOR_HOLD_SECONDS);
+      return;
+    }
+    this.openDoors.set(key, this.time + DOOR_HOLD_SECONDS);
+    this.onDoorRequest(x, y, z, true);
+  }
+
+  /** Closes doors once the hold expires and nobody is standing in them. */
+  updateDoorTimers(player) {
+    if (!this.onDoorRequest) return;
+    for (const [key, expiry] of this.openDoors) {
+      if (this.time < expiry) continue;
+      const [x, y, z] = key.split(',').map(Number);
+      const centreX = x + 0.5;
+      const centreZ = z + 0.5;
+      const occupied = this.entities.some((entity) => !entity.dead
+        && Math.hypot(entity.position.x - centreX, entity.position.z - centreZ) < 1.3)
+        || (player && !player.dead
+          && Math.hypot(player.position.x - centreX, player.position.z - centreZ) < 1.3);
+      if (occupied) {
+        this.openDoors.set(key, this.time + 0.6);
+        continue;
+      }
+      this.openDoors.delete(key);
+      this.onDoorRequest(x, y, z, false);
+    }
+  }
+
+  /** Separates overlapping AABBs so mobs cannot walk through each other or the player. */
+  resolveEntityCollisions(player) {
+    const world = this.world;
+    const bodies = this.entities
+      .filter((entity) => !entity.dead && !entity.sleeping && !entity.ridden)
+      .map((entity) => ({
+        entity,
+        width: entity.width,
+        height: entity.height,
+        fixed: false,
+      }));
+    if (player && !player.dead) {
+      bodies.push({ entity: player, width: PLAYER_WIDTH, height: PLAYER_HEIGHT, fixed: true });
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+          const a = bodies[i];
+          const b = bodies[j];
+          const minDistance = (a.width + b.width) / 2;
+          const ax = a.entity.position.x;
+          const az = a.entity.position.z;
+          const bx = b.entity.position.x;
+          const bz = b.entity.position.z;
+          let dx = bx - ax;
+          let dz = bz - az;
+          let distance = Math.hypot(dx, dz);
+          if (distance >= minDistance) continue;
+          if (a.entity.position.y + a.height <= b.entity.position.y
+            || b.entity.position.y + b.height <= a.entity.position.y) continue;
+          if (distance < 0.0001) {
+            dx = 1;
+            dz = 0;
+            distance = 1;
+          }
+          const nx = dx / distance;
+          const nz = dz / distance;
+          const overlap = minDistance - distance + 0.001;
+          const aMoves = !a.fixed && typeof a.entity.collides === 'function';
+          const bMoves = !b.fixed && typeof b.entity.collides === 'function';
+          if (!aMoves && !bMoves) continue;
+          const aShare = aMoves ? (bMoves ? 0.5 : 1) : 0;
+          const bShare = bMoves ? (aMoves ? 0.5 : 1) : 0;
+          if (aMoves) {
+            const x = ax - nx * overlap * aShare;
+            const z = az - nz * overlap * aShare;
+            if (!a.entity.collides(world, x, a.entity.position.y, z)) {
+              a.entity.position.x = x;
+              a.entity.position.z = z;
+              a.entity.syncModel?.(0);
+            }
+          }
+          if (bMoves) {
+            const x = bx + nx * overlap * bShare;
+            const z = bz + nz * overlap * bShare;
+            if (!b.entity.collides(world, x, b.entity.position.y, z)) {
+              b.entity.position.x = x;
+              b.entity.position.z = z;
+              b.entity.syncModel?.(0);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** Lets unclaimed villagers pick a nearby bed, one owner per bed. */
+  updateVillagerBeds() {
+    if (!this.world?.getBlock) return;
+    const world = this.world;
+    for (const [key, id] of this.bedClaims) {
+      const [x, y, z] = key.split(',').map(Number);
+      const owner = this.entities.find((entity) => entity.id === id);
+      const state = decodeState(world.getBlock(x, y, z));
+      if (!owner || owner.dead || state?.type !== 'bed' || state.head) this.bedClaims.delete(key);
+    }
+    for (const entity of this.entities) {
+      if (entity.dead || entity.kind !== 'villager' || entity.bed) continue;
+      const origin = entity.home ?? entity.position;
+      const cx = Math.floor(origin.x);
+      const cz = Math.floor(origin.z);
+      const cy = Math.floor(entity.position.y);
+      let found = false;
+      for (let dz = -BED_SEARCH_RADIUS; dz <= BED_SEARCH_RADIUS && !found; dz++) {
+        for (let dx = -BED_SEARCH_RADIUS; dx <= BED_SEARCH_RADIUS && !found; dx++) {
+          const x = cx + dx;
+          const z = cz + dz;
+          for (let y = cy - 2; y <= cy + 2 && !found; y++) {
+            const state = decodeState(world.getBlock(x, y, z));
+            if (state?.type !== 'bed' || state.head) continue;
+            const key = `${x},${y},${z}`;
+            if (this.bedClaims.has(key)) continue;
+            const offset = HORIZONTAL_OFFSETS[state.facing];
+            const head = decodeState(world.getBlock(x + offset.x, y, z + offset.z));
+            if (head?.type !== 'bed' || !head.head) continue;
+            this.bedClaims.set(key, entity.id);
+            entity.bed = { x, y, z };
+            found = true;
+          }
+        }
+      }
+    }
+  }
+
+  releaseBed(entity) {
+    if (!entity?.bed) return;
+    const key = `${entity.bed.x},${entity.bed.y},${entity.bed.z}`;
+    if (this.bedClaims.get(key) === entity.id) this.bedClaims.delete(key);
+    entity.bed = null;
+    entity.sleeping = false;
   }
 
   randomSpawnPoint(player, dimension, min = SPAWN_MIN, max = SPAWN_MAX) {
@@ -670,16 +838,29 @@ export class EntityManager {
         eggTimer: finite(data.eggTimer, ANIMAL_TIMING.eggSeconds),
         woolTimer: finite(data.woolTimer, 0),
         sitting: Boolean(data.sitting),
+        bed: data.bed,
+        sleeping: Boolean(data.sleeping),
         // Owner is runtime-only; the current player adopts saved pets.
         owner: data.tamed ? player : null,
         home: data.home,
       });
     }
+    for (const entity of this.entities) {
+      if (entity.kind !== 'villager' || !entity.bed) continue;
+      const key = `${entity.bed.x},${entity.bed.y},${entity.bed.z}`;
+      if (!this.bedClaims.has(key)) this.bedClaims.set(key, entity.id);
+      else this.releaseBed(entity);
+    }
   }
 
   clear() {
-    for (const entity of this.entities) entity.dispose();
+    for (const entity of this.entities) {
+      this.releaseBed(entity);
+      entity.dispose();
+    }
     this.entities.length = 0;
+    this.bedClaims.clear();
+    this.openDoors.clear();
     // A fresh visit should always find pigs waiting on the plaza.
     this.pigSeedAt = 0;
   }

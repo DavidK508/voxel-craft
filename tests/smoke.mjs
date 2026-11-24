@@ -33,6 +33,8 @@ import {
   getArmorInfo,
   getSpawnEggId,
   ITEM_IDS,
+  SPEAR_IDS,
+  getToolInfo,
 } from '../src/shared/items.js';
 import {
   COOKING_RECIPES,
@@ -63,7 +65,8 @@ import { HUD } from '../src/ui/HUD.js';
 import { ContainerStorage } from '../src/game/ContainerStorage.js';
 import { isInWater, waterSurfaceAt } from '../src/shared/water.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
-import { findRecipe } from '../src/shared/recipes.js';
+import { RECIPES, findRecipe } from '../src/shared/recipes.js';
+import { villageChestLoot } from '../src/shared/loot.js';
 import { SimplexNoise, NoiseField, mulberry32 } from '../src/shared/noise.js';
 import { Inventory } from '../src/game/Inventory.js';
 import { ItemDrops } from '../src/game/ItemDrops.js';
@@ -470,6 +473,17 @@ await test('chest storage survives save/load and drops contents when broken', ()
   const invalid = new ContainerStorage();
   invalid.deserialize([{ x: 1, y: 2, z: 3, items: [{ slot: 0, stack: { id: 99999, count: 5 } }] }]);
   assert.equal(invalid.slotsAt(1, 2, 3)[0], null);
+
+  // An emptied village chest still remembers that it was already looted.
+  storage.markLooted(9, 64, 9);
+  const marked = storage.serialize();
+  assert.equal(marked.find((entry) => entry.x === 9 && entry.z === 9)?.looted, true);
+  const restoredMarked = new ContainerStorage();
+  restoredMarked.deserialize(marked);
+  assert.equal(restoredMarked.isLooted(9, 64, 9), true);
+  assert.deepEqual(restoredMarked.slotsAt(9, 64, 9), new Array(CHEST_SLOTS).fill(null));
+  restoredMarked.remove(9, 64, 9);
+  assert.equal(restoredMarked.isLooted(9, 64, 9), false);
 
   const contents = restored.remove(3, 64, -7);
   assert.equal(contents[0].id, 5);
@@ -2186,7 +2200,9 @@ await test('weather follows the camera and switches between rain and snow', () =
     [weather.points.position.x, weather.points.position.y, weather.points.position.z],
     [5, 12, -3],
   );
-  const startY = weather.positions[1];
+  // Pin one flake away from the wrap-around edge so the fall is deterministic.
+  const startY = 5;
+  weather.positions[1] = startY;
   weather.update(camera, 'snow', 0.5);
   assert.ok(weather.positions[1] < startY, 'particles fall over time');
   assert.equal(weather.mode, 'snow');
@@ -2507,6 +2523,232 @@ await test('right-clicking an animal with its food feeds it', async () => {
   assert.equal(Game.prototype.useSpecialItem.call(shearsGame, { use: 'shears' }, null), true);
   assert.equal(picked.sheared, true);
   assert.equal(picked.woolTimer, ANIMAL_TIMING.woolRegrowSeconds);
+});
+
+await test('village houses are furnished with real beds', () => {
+  const seed = 424242;
+  const spawn = findSpawn(seed);
+  const village = nearbyVillages(spawn.x, spawn.z, seed)[0];
+  let feet = 0;
+  let heads = 0;
+  for (let cz = Math.floor((village.z - 28) / CHUNK_SIZE); cz <= Math.floor((village.z + 28) / CHUNK_SIZE); cz++) {
+    for (let cx = Math.floor((village.x - 28) / CHUNK_SIZE); cx <= Math.floor((village.x + 28) / CHUNK_SIZE); cx++) {
+      const chunk = generateChunk(cx, cz, seed);
+      for (const id of chunk.blocks) {
+        const state = decodeState(id);
+        if (state?.type !== 'bed') continue;
+        if (state.head) heads++;
+        else feet++;
+      }
+    }
+  }
+  assert.ok(feet >= 7, `expected seven house beds, found ${feet}`);
+  assert.ok(heads >= 7, `expected seven bed headboards, found ${heads}`);
+});
+
+await test('villages sit on stepped terraces with matching column tops', () => {
+  const seed = 424242;
+  const generator = new WorldGenerator(seed);
+  const spawn = findSpawn(seed);
+  const village = nearbyVillages(spawn.x, spawn.z, seed)[0];
+  const heights = new Set();
+  for (let dz = -27; dz <= 27; dz++) {
+    for (let dx = -27; dx <= 27; dx++) {
+      heights.add(generator.villageSurfaceY(village, village.x + dx, village.z + dz));
+    }
+  }
+  assert.ok(heights.size >= 3, `expected uneven village platforms, got ${[...heights]}`);
+  const plan = generator.villagePlan(village);
+  assert.equal(plan.houses.length, 7);
+  assert.ok(plan.houses.some((house) => house.base !== village.y), 'a house should sit on its own terrace');
+  const cx = Math.floor(village.x / CHUNK_SIZE);
+  const cz = Math.floor(village.z / CHUNK_SIZE);
+  const chunk = generator.generateChunk(cx, cz);
+  const lx = village.x - cx * CHUNK_SIZE;
+  const lz = village.z - cz * CHUNK_SIZE;
+  assert.equal(
+    chunk.heights[lx + lz * CHUNK_SIZE],
+    generator.villageSurfaceY(village, village.x, village.z),
+    'column tops must follow the terraced surface',
+  );
+});
+
+await test('creatures cannot pass through each other or the player', () => {
+  const world = makeFlatWorld(0);
+  const player = {
+    position: { x: 0.5, y: 1, z: 0.5 },
+    creative: true,
+    dead: false,
+    damage() {},
+  };
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 9 });
+  const a = manager.spawnMob('cow', 0.5, 1, 0.5);
+  const b = manager.spawnMob('cow', 0.65, 1, 0.5);
+  manager.update(1 / 60, player, { day: true, creative: true });
+  assert.ok(
+    Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) >= 0.85,
+    'two cows should be pushed apart',
+  );
+  const before = { x: player.position.x, z: player.position.z };
+  const villager = manager.spawnMob('villager', 0.45, 1, 0.5);
+  manager.update(1 / 60, player, { day: true, creative: true });
+  assert.deepEqual(
+    { x: player.position.x, z: player.position.z },
+    before,
+    'the player is not shoved by mobs',
+  );
+  assert.ok(
+    Math.hypot(villager.position.x - player.position.x, villager.position.z - player.position.z) >= 0.55,
+    'a villager should be pushed out of the player',
+  );
+});
+
+await test('creatures open doors and closed doors swing back after traffic leaves', () => {
+  const world = {
+    getBlock(x, y, z) {
+      if (y === 0) return 1;
+      if (x === 1 && z === 0 && y === 1) return getDoorId(2, false, 0);
+      if (x === 1 && z === 0 && y === 2) return getDoorId(2, false, 1);
+      return 0;
+    },
+    isSolidAt(x, y, z) {
+      return getBlock(this.getBlock(x, y, z))?.solid === true;
+    },
+    isChunkLoadedAt() { return true; },
+  };
+  const player = { position: { x: 20, y: 1, z: 20 }, creative: true, dead: false, damage() {} };
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 10 });
+  const requests = [];
+  manager.onDoorRequest = (x, y, z, open) => requests.push({ x, y, z, open });
+  const villager = manager.spawnMob('villager', 0.5, 1, 0.5, { home: { x: 2, z: 0 } });
+  villager.steerAround(world, 1, 0, 0.1, manager);
+  assert.ok(requests.some((request) => request.open), 'a blocked creature should request the door to open');
+
+  manager.time = 100;
+  villager.position.set(8.5, 1, 8.5);
+  manager.updateDoorTimers(player);
+  assert.ok(requests.some((request) => !request.open), 'unused doors close again');
+});
+
+await test('villagers claim beds, sleep at night and wake at sunrise', () => {
+  const world = makeFlatWorld(0);
+  world.getBlock = (x, y, z) => {
+    if (y === 0) return 1;
+    if (x === 3 && y === 1 && z === 3) return getBedId(2, false);
+    if (x === 3 && y === 1 && z === 4) return getBedId(2, true);
+    return 0;
+  };
+  const player = { position: { x: 20, y: 1, z: 20 }, creative: true, dead: false, damage() {} };
+  const manager = new EntityManager({ scene: { add() {} }, world, drops: null, seed: 11 });
+  const sleeper = manager.spawnMob('villager', 5.5, 1, 5.5, { home: { x: 4, z: 4 } });
+  manager.updateVillagerBeds();
+  assert.deepEqual(sleeper.bed, { x: 3, y: 1, z: 3 }, 'the villager should claim the bed foot');
+  const other = manager.spawnMob('villager', 5.5, 1, 6.5, { home: { x: 4, z: 4 } });
+  manager.updateVillagerBeds();
+  assert.equal(other.bed, null, 'a bed can only be claimed once');
+  for (let i = 0; i < 240; i++) {
+    manager.update(1 / 30, player, { day: false, creative: true, timeOfDay: 18000 });
+  }
+  assert.equal(sleeper.sleeping, true, 'the villager should lie down at night');
+  assert.ok(Math.abs(sleeper.position.x - 3.5) < 0.2, 'the sleeper rests on the bed');
+  manager.update(1 / 30, player, { day: true, creative: true, timeOfDay: 6000 });
+  assert.equal(sleeper.sleeping, false, 'sunrise wakes the villager');
+});
+
+await test('village chests hold deterministic useful loot without restocking placed chests', async () => {
+  const loot = villageChestLoot(10, 65, 20).filter(Boolean);
+  assert.ok(loot.length >= 3, 'generated chests should contain several stacks');
+  assert.deepEqual(villageChestLoot(10, 65, 20), villageChestLoot(10, 65, 20));
+  assert.notDeepEqual(villageChestLoot(11, 65, 20), villageChestLoot(10, 65, 20));
+  for (const stack of loot) assert.ok(getItem(stack.id), `loot item ${stack.id} must exist`);
+
+  const { Game } = await import('../src/game/Game.js');
+  const seed = 424242;
+  const village = nearbyVillages(findSpawn(seed).x, findSpawn(seed).z, seed)[0];
+  let target = { x: village.x + 5, y: village.y + 1, z: village.z + 5, id: 200 };
+  const containers = new ContainerStorage();
+  let slots = containers.slotsAt(target.x, target.y, target.z);
+  let opened = null;
+  const fakeGame = {
+    world: { seed },
+    player: { sneaking: false, raycast: () => target },
+    inventory: {},
+    containers,
+    onInventoryChanged() {},
+    openInventory(index, options) { opened = options; },
+  };
+  Game.prototype.useItem.call(fakeGame);
+  assert.ok(opened?.chest);
+  assert.ok(slots.some(Boolean), 'a village chest should be stocked on first open');
+  assert.equal(containers.isLooted(target.x, target.y, target.z), true);
+
+  slots.fill(null); // the player emptied the chest
+  Game.prototype.useItem.call(fakeGame);
+  assert.ok(slots.every((stack) => stack === null), 'emptied chests are not refilled');
+
+  target = { x: village.x + 9, y: village.y + 1, z: village.z + 9, id: 200 };
+  containers.markLooted(target.x, target.y, target.z);
+  slots = containers.slotsAt(target.x, target.y, target.z);
+  Game.prototype.useItem.call(fakeGame);
+  assert.ok(slots.every((stack) => stack === null), 'player-placed chests stay empty');
+
+  target = { x: 1000, y: 70, z: 1000, id: 200 };
+  slots = containers.slotsAt(target.x, target.y, target.z);
+  Game.prototype.useItem.call(fakeGame);
+  assert.ok(slots.every((stack) => stack === null), 'chests outside villages stay empty');
+});
+
+await test('spears, bows and arrows extend the weapon roster', async () => {
+  const materials = ['wood', 'stone', 'iron', 'diamond', 'gold', 'netherite'];
+  materials.forEach((material, index) => {
+    assert.equal(SPEAR_IDS[material], 324 + index);
+    assert.equal(getToolInfo(SPEAR_IDS[material]).type, 'spear');
+    assert.ok(RECIPES.some((recipe) => recipe.id === `${material}_spear`));
+  });
+  assert.equal(getToolInfo(303).type, 'sword', 'existing tool ids must not shift');
+  assert.equal(getItem(ITEM_IDS.BOW).tool.type, 'bow');
+  assert.equal(getItem(ITEM_IDS.ARROW).stack, 64);
+  const spear = findRecipe([null, 403, null, null, 403, null, 403, 400, null], 3);
+  assert.equal(spear?.result.id, SPEAR_IDS.iron);
+  assert.ok(RECIPES.some((recipe) => recipe.id === 'bow'));
+  assert.ok(RECIPES.some((recipe) => recipe.id === 'arrow'));
+
+  const { Game } = await import('../src/game/Game.js');
+  const game = {
+    inventory: { selectedStack: { id: SPEAR_IDS.iron } },
+    isCreative: () => false,
+  };
+  assert.ok(Game.prototype.getAttackDamage.call(game) > 4, 'a spear hits harder than bare hands');
+  let consumed = 0;
+  let attack = null;
+  let reach = 0;
+  const bowGame = {
+    ...game,
+    attackCooldown: 0,
+    riding: false,
+    net: null,
+    inventory: {
+      selectedStack: { id: ITEM_IDS.BOW },
+      consumeItem(id) { if (id === ITEM_IDS.ARROW) { consumed++; return true; } return false; },
+      damageSelected() { return false; },
+    },
+    player: { eyePosition: {}, getDirection: () => ({}), raycast: () => null },
+    entities: {
+      pick(eye, direction, maxDistance) {
+        reach = maxDistance;
+        return { entity: {}, distance: 6 };
+      },
+      attack(entity, damage, player, tool) { attack = { damage, tool }; return false; },
+    },
+    audio: { playClick() {} },
+    hud: { toast() {} },
+    tryAttackPlayer() { return false; },
+    getAttackDamage() { return 6; },
+  };
+  assert.equal(Game.prototype.tryAttack.call(bowGame), true);
+  assert.equal(consumed, 1, 'a bow shot consumes one arrow');
+  assert.ok(reach >= 12, 'bows reach farther than melee weapons');
+  assert.equal(attack.tool.type, 'bow');
 });
 
 console.log(`\n${results.length - failed}/${results.length} tests passed.`);

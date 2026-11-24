@@ -23,7 +23,8 @@ import { loadAppearance, saveAppearance } from '../shared/appearance.js';
 import { getBiomeInfo } from '../shared/biomes.js';
 import { CHEST_BLOCK } from '../shared/storage.js';
 import { ContainerStorage } from './ContainerStorage.js';
-import { createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
+import { villageChestLoot } from '../shared/loot.js';
+import { ITEM_IDS, createItemStack, getFoodInfo, getItem, getToolInfo } from '../shared/items.js';
 import {
   FARMLAND_BLOCK,
   getNextCropStage,
@@ -77,6 +78,7 @@ import {
   NETHER_ORIGIN,
   dimensionAt,
   findSpawn,
+  nearbyVillages,
 } from '../world/generator.js';
 import { AudioManager } from '../audio/AudioManager.js';
 import { QUALITY } from '../shared/quality.js';
@@ -1504,6 +1506,11 @@ export class Game {
     if (y < 0 || y >= WORLD_HEIGHT || !this.world.isChunkLoadedAt(x, z)) return;
     const oldId = this.world.getBlock(x, y, z);
     if (!this.world.setBlock(x, y, z, id)) return;
+    if (id === CHEST_BLOCK && oldId !== CHEST_BLOCK) {
+      this.containers?.markLooted?.(x, y, z);
+    } else if (id === 0 && oldId === CHEST_BLOCK) {
+      this.containers?.remove?.(x, y, z);
+    }
     if (id === 0 && oldId !== 0) {
       this.blockParticles?.burst(x + 0.5, y + 0.5, z + 0.5, oldId);
       this.redstone?.onBlockRemoved(x, y, z, oldId);
@@ -1649,19 +1656,21 @@ export class Game {
     const tool = getToolInfo(heldId);
     let damage = 1;
     if (tool?.type === 'sword') damage = 3 + (tool.tier ?? 1);
+    else if (tool?.type === 'spear') damage = 2 + (tool.tier ?? 1) * 1.2;
+    else if (tool?.type === 'bow') damage = 5 + (tool.tier ?? 1);
     else if (tool?.type === 'axe') damage = 2 + (tool.tier ?? 1) * 0.6;
     else if (tool) damage = 1 + (tool.tier ?? 1) * 0.25;
     if (this.isCreative()) damage = Math.max(damage, 10);
     return damage;
   }
 
-  pickRemotePlayer() {
+  pickRemotePlayer(maxDistance = 4.5) {
     if (!this.net || !this.player || !this.remotePlayers.size) return null;
     const eye = this.player.eyePosition;
     const direction = this.player.getDirection();
     const ray = new THREE.Ray(eye, direction);
     let best = null;
-    let bestDistance = 4.5;
+    let bestDistance = maxDistance;
     for (const [id, player] of this.remotePlayers) {
       if ((player.health ?? 20) <= 0) continue;
       const center = new THREE.Vector3(player.x, player.y + 1.02, player.z);
@@ -1677,8 +1686,8 @@ export class Game {
     return best;
   }
 
-  tryAttackPlayer() {
-    const hit = this.pickRemotePlayer();
+  tryAttackPlayer(reach = 4.5) {
+    const hit = this.pickRemotePlayer(reach);
     if (!hit) return false;
     this.attackCooldown = 0.45;
     const damage = this.getAttackDamage();
@@ -1959,6 +1968,7 @@ export class Game {
         seed: worldSeed,
         audio: this.audio,
       });
+      this.entities.onDoorRequest = (x, y, z, open) => this.setDoorForEntity(x, y, z, open);
       this.entities.onBossSpawn = (boss) => this.hud.toast(`${boss.name} пробудился в Крае!`, 3200);
       this.entities.onBossDefeat = (boss) => this.hud.toast(`${boss.name} побеждён!`, 3400);
       // Hits on other creatures get their own impact sound; player damage
@@ -2910,10 +2920,21 @@ export class Game {
         return;
       }
       if (targetBlock.interactive === 'chest') {
-        this.openInventory(2, {
-          chest: true,
-          slots: this.containers.slotsAt(target.x, target.y, target.z),
-        });
+        const slots = this.containers.slotsAt(target.x, target.y, target.z);
+        // Generated village chests come pre-stocked, but a chest the player
+        // placed (or already looted) must stay untouched.
+        if (!this.containers.isLooted(target.x, target.y, target.z)
+          && slots.every((stack) => stack === null)
+          && nearbyVillages(target.x, target.z, this.world.seed).some((village) => (
+            Math.abs(village.x - target.x) <= 28 && Math.abs(village.z - target.z) <= 28
+          ))) {
+          villageChestLoot(target.x, target.y, target.z).forEach((stack, index) => {
+            if (stack) slots[index] = stack;
+          });
+          this.containers.markLooted(target.x, target.y, target.z);
+          this.onInventoryChanged();
+        }
+        this.openInventory(2, { chest: true, slots });
         return;
       }
       if (targetBlock.interactive === 'bed') {
@@ -3182,6 +3203,21 @@ export class Game {
     this.audio.playClick();
   }
 
+  /** Swings both halves of a door for a creature, without redstone feedback. */
+  setDoorForEntity(x, y, z, open) {
+    if (!this.world) return false;
+    const state = decodeState(this.world.getBlock(x, y, z));
+    if (state?.type !== 'door' || state.open === open) return false;
+    const footY = state.half ? y - 1 : y;
+    let changed = false;
+    for (let half = 0; half < 2; half++) {
+      const yy = footY + half;
+      if (this.world.getBlock(x, yy, z) === 0) continue;
+      if (this.setBlockSynced(x, yy, z, getDoorId(state.facing, open, half))) changed = true;
+    }
+    return changed;
+  }
+
   /**
    * Sends the player to sleep in a bed: night is skipped, health is restored a
    * little and the bed becomes the new respawn point, like in Minecraft.
@@ -3295,15 +3331,23 @@ export class Game {
 
   tryAttack() {
     if (!this.entities || this.attackCooldown > 0 || this.riding) return false;
-    if (this.tryAttackPlayer()) return true;
-    const hit = this.entities.pick(this.player.eyePosition, this.player.getDirection(), 4.5);
+    const heldId = this.inventory.selectedStack?.id ?? null;
+    const tool = getToolInfo(heldId);
+    const bow = tool?.type === 'bow';
+    const reach = tool?.type === 'spear' ? 6.5 : bow ? 12 : 4.5;
+    // A bow spends one arrow per shot, wherever it sits in the inventory.
+    if (bow && !this.inventory.consumeItem(ITEM_IDS.ARROW, 1)) {
+      this.hud.toast('Нужны стрелы');
+      return false;
+    }
+    if (this.tryAttackPlayer(reach)) return true;
+    const hit = this.entities.pick(this.player.eyePosition, this.player.getDirection(), reach);
     if (!hit) return false;
     const block = this.player.raycast(this.world);
     if (block && block.distance < hit.distance) return false;
     this.attackCooldown = 0.45;
+    this.inventory.damageSelected?.(1);
 
-    const heldId = this.inventory.selectedStack?.id ?? null;
-    const tool = getToolInfo(heldId);
     const damage = this.getAttackDamage();
 
     const died = this.entities.attack(hit.entity, damage, this.player, tool);
@@ -3521,6 +3565,8 @@ export class Game {
     const block = getBlock(blockId);
     for (const part of parts) {
       if (!this.setBlockSynced(part.x, part.y, part.z, part.id)) return;
+      // A chest carried in by the player is empty by design, even in a village.
+      if (part.id === CHEST_BLOCK) this.containers.markLooted(part.x, part.y, part.z);
       this.blockParticles?.burst(part.x + 0.5, part.y + 0.5, part.z + 0.5, part.id, 8);
       this.redstone?.notify(part.x, part.y, part.z);
       if (getBlock(part.id).fluid) {

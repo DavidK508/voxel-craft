@@ -21,6 +21,9 @@ function normalizeStack(stack) {
 export class ContainerStorage {
   constructor() {
     this.containers = new Map();
+    // Chests that have already been stocked (or were placed by a player) keep
+    // their marker even when empty, so village loot is never handed out twice.
+    this.looted = new Set();
   }
 
   slotsAt(x, y, z) {
@@ -37,32 +40,46 @@ export class ContainerStorage {
     return this.containers.has(keyOf(x, y, z));
   }
 
+  /** Marks a chest as already handled so generated loot cannot refill it. */
+  markLooted(x, y, z) {
+    this.looted.add(keyOf(x, y, z));
+  }
+
+  isLooted(x, y, z) {
+    return this.looted.has(keyOf(x, y, z));
+  }
+
   /** Returns the contents when a chest is broken, removing it from storage. */
   remove(x, y, z) {
     const key = keyOf(x, y, z);
     const slots = this.containers.get(key);
     this.containers.delete(key);
+    this.looted.delete(key);
     return slots ?? null;
   }
 
   serialize() {
     const result = [];
-    for (const [key, slots] of this.containers) {
+    const keys = new Set([...this.containers.keys(), ...this.looted]);
+    for (const key of keys) {
       const [x, y, z] = key.split(',').map(Number);
       if (![x, y, z].every(Number.isFinite)) continue;
+      const slots = this.containers.get(key) ?? new Array(CHEST_SLOTS).fill(null);
       const items = [];
       for (let index = 0; index < slots.length; index++) {
         const stack = normalizeStack(slots[index]);
         if (stack) items.push({ slot: index, stack });
       }
-      if (!items.length) continue;
-      result.push({ x, y, z, items });
+      const looted = this.looted.has(key);
+      if (!items.length && !looted) continue;
+      result.push({ x, y, z, items, ...(looted ? { looted: true } : {}) });
     }
     return result;
   }
 
   deserialize(entries) {
     this.containers.clear();
+    this.looted.clear();
     if (!Array.isArray(entries)) return;
     for (const entry of entries) {
       const x = Math.floor(Number(entry?.x));
@@ -76,11 +93,17 @@ export class ContainerStorage {
         const stack = normalizeStack(item?.stack);
         if (index >= 0 && index < CHEST_SLOTS && stack) slots[index] = stack;
       }
-      if (slots.some(Boolean)) this.containers.set(keyOf(x, y, z), slots);
+      const key = keyOf(x, y, z);
+      if (slots.some(Boolean)) this.containers.set(key, slots);
+      if (entry.looted === true) {
+        this.looted.add(key);
+        if (!this.containers.has(key)) this.containers.set(key, new Array(CHEST_SLOTS).fill(null));
+      }
     }
   }
 
   clear() {
     this.containers.clear();
+    this.looted.clear();
   }
 }

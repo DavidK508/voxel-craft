@@ -4,7 +4,7 @@ import {
   WORLD_HEIGHT,
 } from '../shared/constants.js';
 import { NoiseField, clamp, hash2i, hash3i, lerp, smoothstep } from '../shared/noise.js';
-import { getDoorId } from '../shared/blocks.js';
+import { getBedId, getDoorId } from '../shared/blocks.js';
 
 import { BIOME, BIOME_INFO } from '../shared/biomes.js';
 
@@ -581,6 +581,111 @@ export class WorldGenerator {
     return found;
   }
 
+  /**
+   * Low-frequency, deterministic terrace offset for a village column. The
+   * smooth waves keep neighbouring columns within one block of each other, so
+   * paths stay climbable while the settlement still sits on uneven ground.
+   */
+  villageTerraceOffset(village, wx, wz) {
+    const dx = wx - village.x;
+    const dz = wz - village.z;
+    const dist = Math.hypot(dx, dz);
+    // The well, crop garden and livestock paddock remain level and usable.
+    if (dist <= 8) return 0;
+    if (dx >= 13 && dx <= 24 && dz >= -9 && dz <= 9) return 0;
+    if (dz >= 13 && dz <= 20 && dx >= -8 && dx <= 8) return 0;
+    const phaseA = (this.seed >>> 0) * 0.000017;
+    const phaseB = village.x * 0.017 + village.z * 0.011;
+    const weight = clamp((dist - 8) / 22, 0, 1);
+    const field = Math.sin(wx * 0.07 + phaseA) + Math.cos(wz * 0.083 + phaseB);
+    return Math.round(clamp(field * weight, -2, 2));
+  }
+
+  /** House footprints and their terrace heights, cached on the village record. */
+  villagePlan(village) {
+    if (village.layout) return village.layout;
+    const { x: vx, z: vz, y: base } = village;
+    const radius = 28;
+    const houseStyles = [
+      { w: 7, d: 6, style: 0 },
+      { w: 6, d: 6, style: 1 },
+      { w: 6, d: 7, style: 2 },
+      { w: 8, d: 5, style: 3 },
+      { w: 5, d: 8, style: 4 },
+      { w: 7, d: 7, style: 5 },
+      { w: 6, d: 5, style: 6 },
+    ];
+    const reserved = [
+      { x0: vx - 6, z0: vz - 6, x1: vx + 6, z1: vz + 6 },
+      { x0: vx - 9, z0: vz + 11, x1: vx + 9, z1: vz + 21 },
+      { x0: vx + 12, z0: vz - 9, x1: vx + 24, z1: vz + 9 },
+    ];
+    const overlaps = (a, b, margin) => (
+      a.x0 - margin <= b.x1 && a.x1 + margin >= b.x0
+      && a.z0 - margin <= b.z1 && a.z1 + margin >= b.z0
+    );
+    const inside = (rect) => (
+      rect.x0 >= vx - radius + 2 && rect.x1 <= vx + radius - 2
+      && rect.z0 >= vz - radius + 2 && rect.z1 <= vz + radius - 2
+    );
+    const candidates = [];
+    for (let oz = -20; oz <= 9; oz += 5) {
+      for (let ox = -23; ox <= 9; ox += 5) candidates.push({ ox, oz });
+    }
+    for (let ox = -20; ox <= 8; ox += 7) {
+      candidates.push({ ox, oz: -26 }, { ox, oz: -21 }, { ox, oz: 23 }, { ox, oz: 26 });
+    }
+    candidates.sort((a, b) => {
+      const score = (c, salt) => Math.hypot(c.ox + 3, c.oz + 3)
+        + hash2i(vx + c.ox, vz + c.oz, this.seed ^ salt) * 9;
+      return score(a, 0x9e8c) - score(b, 0x9e8c);
+    });
+    const doorTowardsPlaza = (ox, oz, w, d) => {
+      const cx = ox + (w - 1) / 2;
+      const cz = oz + (d - 1) / 2;
+      if (Math.abs(cx) > Math.abs(cz)) return cx > 0 ? 3 : 1;
+      return cz > 0 ? 0 : 2;
+    };
+    const houses = [];
+    for (let i = 0; i < houseStyles.length; i++) {
+      const def = houseStyles[i];
+      for (let n = 0; n < candidates.length; n++) {
+        const cand = candidates[(n + i * 3) % candidates.length];
+        const rect = {
+          x0: vx + cand.ox,
+          z0: vz + cand.oz,
+          x1: vx + cand.ox + def.w - 1,
+          z1: vz + cand.oz + def.d - 1,
+        };
+        if (!inside(rect)) continue;
+        if (reserved.some((zone) => overlaps(rect, zone, 1))) continue;
+        if (houses.some((house) => overlaps(rect, house.rect, 1))) continue;
+        const centreX = vx + cand.ox + (def.w - 1) / 2;
+        const centreZ = vz + cand.oz + (def.d - 1) / 2;
+        houses.push({
+          ...def,
+          ox: cand.ox,
+          oz: cand.oz,
+          door: doorTowardsPlaza(cand.ox, cand.oz, def.w, def.d),
+          rect,
+          base: base + clamp(this.villageTerraceOffset(village, centreX, centreZ), -1, 2),
+        });
+        break;
+      }
+    }
+    village.layout = { houses };
+    return village.layout;
+  }
+
+  /** Final ground height at a village column, including house terraces. */
+  villageSurfaceY(village, wx, wz) {
+    for (const house of this.villagePlan(village).houses) {
+      if (wx >= house.rect.x0 - 1 && wx <= house.rect.x1 + 1
+        && wz >= house.rect.z0 - 1 && wz <= house.rect.z1 + 1) return house.base;
+    }
+    return village.y + this.villageTerraceOffset(village, wx, wz);
+  }
+
   placeVillages(blocks, heights, cx, cz, baseX, baseZ) {
     const villages = this.villagesNearChunk(cx, cz);
     if (villages.length === 0) return;
@@ -599,7 +704,7 @@ export class WorldGenerator {
       return blocks[lx + (lz << 4) + (y << 8)];
     };
     for (const village of villages) this.buildVillage(village, setWorld, getWorld);
-    // Village floors are flat, so refresh the column tops that lie in this chunk.
+    // Refresh column tops to the terraced village surface, not a single plane.
     for (const village of villages) {
       const radius = 28;
       for (let dz = -radius; dz <= radius; dz++) {
@@ -611,7 +716,7 @@ export class WorldGenerator {
           const lz = wz - baseZ;
           if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) continue;
           const index = lx + lz * CHUNK_SIZE;
-          heights[index] = Math.max(heights[index], village.y);
+          heights[index] = this.villageSurfaceY(village, wx, wz);
         }
       }
     }
@@ -624,97 +729,28 @@ export class WorldGenerator {
     const sub = desert ? ID.sand : ID.dirt;
     const radius = 28;
 
-    // Flatten a generous plaza so houses never float over uneven ground.
+    const plan = this.villagePlan(village);
+
+    // Terrace the settlement into the landscape instead of flattening one huge
+    // plane: each column gets its own surface from the deterministic field,
+    // and house plots are levelled onto their own step.
     for (let dz = -radius; dz <= radius; dz++) {
       for (let dx = -radius; dx <= radius; dx++) {
         if (dx * dx + dz * dz > radius * radius + 6) continue;
         const wx = vx + dx;
         const wz = vz + dz;
-        for (let y = base - 3; y <= base; y++) set(wx, y, wz, y === base ? ground : sub);
-        for (let y = base + 1; y <= base + 12; y++) {
+        const surface = this.villageSurfaceY(village, wx, wz);
+        for (let y = surface - 3; y <= surface; y++) set(wx, y, wz, y === surface ? ground : sub);
+        for (let y = surface + 1; y <= base + 14; y++) {
           const existing = get(wx, y, wz);
           if (existing !== ID.air) set(wx, y, wz, ID.air);
         }
       }
     }
 
-    // Seven distinct footprints around the plaza. The previous version used a
-    // single hash value for both coordinates, which produced fractional blocks
-    // (silently dropped by the Uint8Array) and five houses in the same row.
-    const houseStyles = [
-      { w: 7, d: 6, style: 0 }, // timber cottage
-      { w: 6, d: 6, style: 1 }, // red-roofed home
-      { w: 6, d: 7, style: 2 }, // stone house
-      { w: 8, d: 5, style: 3 }, // wide hall
-      { w: 5, d: 8, style: 4 }, // desert / whitewashed cottage
-      { w: 7, d: 7, style: 5 }, // garden cottage
-      { w: 6, d: 5, style: 6 }, // brick workshop with a chimney
-    ];
-
-    const reserved = [
-      { x0: vx - 6, z0: vz - 6, x1: vx + 6, z1: vz + 6 }, // well and street lamps
-      { x0: vx - 9, z0: vz + 11, x1: vx + 9, z1: vz + 21 }, // crop garden
-      { x0: vx + 12, z0: vz - 9, x1: vx + 24, z1: vz + 9 }, // livestock farm
-    ];
-    const overlaps = (a, b, margin) => (
-      a.x0 - margin <= b.x1 && a.x1 + margin >= b.x0
-      && a.z0 - margin <= b.z1 && a.z1 + margin >= b.z0
-    );
-    const inside = (rect) => (
-      rect.x0 >= vx - radius + 2 && rect.x1 <= vx + radius - 2
-      && rect.z0 >= vz - radius + 2 && rect.z1 <= vz + radius - 2
-    );
-
-    // Candidate top-left offsets form a loose ring around the plaza. Sorting by
-    // distance plus deterministic jitter keeps the layout stable for a seed.
-    const candidates = [];
-    for (let oz = -20; oz <= 9; oz += 5) {
-      for (let ox = -23; ox <= 9; ox += 5) candidates.push({ ox, oz });
-    }
-    for (let ox = -20; ox <= 8; ox += 7) {
-      candidates.push({ ox, oz: -26 }, { ox, oz: -21 }, { ox, oz: 23 }, { ox, oz: 26 });
-    }
-    candidates.sort((a, b) => {
-      const score = (c, salt) => Math.hypot(c.ox + 3, c.oz + 3)
-        + hash2i(vx + c.ox, vz + c.oz, this.seed ^ salt) * 9;
-      return score(a, 0x9e8c) - score(b, 0x9e8c);
-    });
-
-    const doorTowardsPlaza = (ox, oz, w, d) => {
-      const cx = ox + (w - 1) / 2;
-      const cz = oz + (d - 1) / 2;
-      if (Math.abs(cx) > Math.abs(cz)) return cx > 0 ? 3 : 1;
-      return cz > 0 ? 0 : 2;
-    };
-
-    const placedHouses = [];
-    for (let i = 0; i < houseStyles.length; i++) {
-      const def = houseStyles[i];
-      for (let n = 0; n < candidates.length; n++) {
-        const cand = candidates[(n + i * 3) % candidates.length];
-        const rect = {
-          x0: vx + cand.ox,
-          z0: vz + cand.oz,
-          x1: vx + cand.ox + def.w - 1,
-          z1: vz + cand.oz + def.d - 1,
-        };
-        if (!inside(rect)) continue;
-        if (reserved.some((zone) => overlaps(rect, zone, 1))) continue;
-        if (placedHouses.some((house) => overlaps(rect, house.rect, 1))) continue;
-        placedHouses.push({
-          ...def,
-          ox: cand.ox,
-          oz: cand.oz,
-          door: doorTowardsPlaza(cand.ox, cand.oz, def.w, def.d),
-          rect,
-        });
-        break;
-      }
-    }
-
-    for (const house of placedHouses) {
+    for (const house of plan.houses) {
       this.buildHouse(
-        vx + house.ox, vz + house.oz, base,
+        vx + house.ox, vz + house.oz, house.base,
         house.w, house.d, house.door, set, desert, house.style,
       );
     }
@@ -747,11 +783,12 @@ export class WorldGenerator {
 
     this.buildGarden(vx, vz, base, set, desert);
     this.buildFarm(vx, vz, base, set, desert);
-    this.buildVillagePaths(vx, vz, base, set, desert, placedHouses);
+    this.buildVillagePaths(village, set, desert, plan.houses);
   }
 
-  /** Gravel/sandstone lanes from the well to every house, the garden and the farm. */
-  buildVillagePaths(vx, vz, base, set, desert, houses) {
+  /** Gravel/sandstone lanes from the well to every house, following the terraces. */
+  buildVillagePaths(village, set, desert, houses) {
+    const { x: vx, z: vz } = village;
     const paving = desert ? ID.sandstone : ID.gravel;
     const pave = (x, z) => {
       const dx = x - vx;
@@ -761,7 +798,9 @@ export class WorldGenerator {
       if (dz >= 14 && dz <= 18 && dx >= -6 && dx <= 6) return; // leave the crops alone
       if (houses.some((h) => x >= vx + h.ox && x <= vx + h.ox + h.w - 1
         && z >= vz + h.oz && z <= vz + h.oz + h.d - 1)) return;
-      set(x, base, z, paving);
+      const surface = this.villageSurfaceY(village, x, z);
+      set(x, surface - 1, z, desert ? ID.sand : ID.dirt);
+      set(x, surface, z, paving);
     };
     const lane = (x0, z0, x1, z1) => {
       let x = x0;
@@ -985,11 +1024,16 @@ export class WorldGenerator {
     set(x0 + 1, base + 1, z0 + 1, styleIndex === 0 || styleIndex === 3 ? 21 : 22);
     set(x0 + 1, base + 1, z0 + depth - 2, ID.chest);
     if (styleIndex !== 1 && styleIndex !== 4) set(x0 + width - 2, base + 1, z0 + depth - 2, 48);
-    if (styleIndex === 4 || styleIndex === 5) {
-      set(x0 + 2, base + 1, z0 + 1, 42);
-      set(x0 + 2, base + 1, z0 + 2, 44); // a cosy two-tone bed
+    // Every house gets a real, two-block bed so villagers can actually sleep.
+    const bedX = x0 + 2;
+    const bedZ = z0 + 1;
+    set(bedX, base + 1, bedZ, getBedId(2, false));
+    set(bedX, base + 1, bedZ + 1, getBedId(2, true));
+    const lampX = x0 + Math.floor(width / 2);
+    const lampZ = z0 + Math.floor(depth / 2);
+    if (!(lampX === bedX && (lampZ === bedZ || lampZ === bedZ + 1))) {
+      set(lampX, base + 1, lampZ, 29);
     }
-    set(x0 + Math.floor(width / 2), base + 1, z0 + Math.floor(depth / 2), 29);
     if (styleIndex === 6) {
       // Brick workshop chimney rising through the roof.
       const cx = x0 + width - 2;

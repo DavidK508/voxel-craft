@@ -1174,6 +1174,18 @@ function makeItemIconCanvas(item) {
     }
   };
 
+  if (item.tool && key === 'bow') {
+    for (let y = 2; y <= 13; y++) {
+      const x = 6 + Math.round(Math.sin(((y - 2) / 11) * Math.PI) * 2);
+      setIconPixel(ctx, x, y, '#6b4325');
+      setIconPixel(ctx, x + 1, y, '#a06a3d');
+      setIconPixel(ctx, 12, y, '#d8d8d8');
+    }
+    for (let x = 5; x <= 12; x++) setIconPixel(ctx, x, 8, '#b7b7bd');
+    setIconPixel(ctx, 13, 8, '#e8e8ee');
+    return canvas;
+  }
+
   if (item.tool) {
     const material = item.iconMaterial;
     const colors = {
@@ -1213,6 +1225,16 @@ function makeItemIconCanvas(item) {
         setIconPixel(ctx, 4 + i, 11 - i, colors[0]);
       }
       for (let i = 0; i < 5; i++) setIconPixel(ctx, 2 + i, 10 + (i % 2), '#6b4325');
+    } else if (key === 'spear') {
+      for (let i = 0; i < 10; i++) {
+        setIconPixel(ctx, 4 + i, 12 - i, '#6b4325');
+        setIconPixel(ctx, 5 + i, 12 - i, '#a06a3d');
+      }
+      for (let i = 0; i < 4; i++) {
+        setIconPixel(ctx, 13 + Math.floor(i / 2), 3 - i, colors[0]);
+        setIconPixel(ctx, 14, 2 - Math.floor(i / 2), colors[1]);
+      }
+      setIconPixel(ctx, 15, 1, colors[1]);
     } else if (key === 'hoe') {
       for (let y = 3; y <= 6; y++) {
         setIconPixel(ctx, 10, y, colors[0]);
@@ -1230,6 +1252,16 @@ function makeItemIconCanvas(item) {
       setIconPixel(ctx, 5 + i, 12 - i, '#6b4325');
       setIconPixel(ctx, 6 + i, 12 - i, '#a06a3d');
     }
+  } else if (key === 'arrow') {
+    for (let x = 2; x <= 13; x++) {
+      setIconPixel(ctx, x, 8, '#6b4325');
+      setIconPixel(ctx, x, 9, '#a06a3d');
+    }
+    setIconPixel(ctx, 14, 8, '#b7b7bd');
+    setIconPixel(ctx, 14, 9, '#e8e8ee');
+    setIconPixel(ctx, 15, 8, '#e8e8ee');
+    setIconPixel(ctx, 2, 7, '#d8d8d8');
+    setIconPixel(ctx, 2, 10, '#d8d8d8');
   } else if (key === 'coal') {
     const shape = [
       '...1111...',

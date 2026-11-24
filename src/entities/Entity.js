@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getBlock } from '../shared/blocks.js';
+import { decodeState, getBlock } from '../shared/blocks.js';
 import { SEA_LEVEL } from '../shared/constants.js';
 import { ANIMAL_TIMING, animalDiet } from '../shared/animalFoods.js';
 import { isInWater, isWaterBlock, waterSurfaceAt } from '../shared/water.js';
@@ -66,6 +66,9 @@ export class Entity {
     this.eggTimer = options.eggTimer ?? ANIMAL_TIMING.eggSeconds * (0.6 + Math.random() * 0.8);
     this.woolTimer = options.woolTimer ?? 0;
     this.sitting = options.sitting ?? false;
+    this.bed = options.bed ?? null;
+    this.bedTimer = 0;
+    this.sleeping = options.sleeping ?? false;
     this.panicX = options.panicX ?? null;
     this.panicZ = options.panicZ ?? null;
     this.home = options.home ? { x: options.home.x, z: options.home.z } : null;
@@ -183,7 +186,7 @@ export class Entity {
    * clear route. The chosen detour is held briefly so the creature does not
    * jitter between equally good left/right turns.
    */
-  steerAround(world, x, z, dt) {
+  steerAround(world, x, z, dt, manager = null) {
     const length = Math.hypot(x, z);
     if (length < 0.04 || !world?.getBlock) return { x, z, detour: false };
     const nx = x / length;
@@ -203,6 +206,12 @@ export class Entity {
       );
     };
 
+    // A closed door is just another solid block to the collision code. Ask the
+    // manager to swing it open before committing to a detour, so villagers and
+    // animals can actually walk through house entrances.
+    if (!clear(0, 0.85) || !clear(0, 1.45)) {
+      this.requestDoorAhead(world, { x: nx, z: nz }, manager);
+    }
     if (clear(0, 0.85) && clear(0, 1.45)) {
       this.detourTimer = 0;
       this.detourAngle = 0;
@@ -224,6 +233,33 @@ export class Entity {
       return { x: dir.x * length, z: dir.z * length, detour: true };
     }
     return { x, z, detour: false };
+  }
+
+  /** Requests that a closed door directly ahead be opened by the manager. */
+  requestDoorAhead(world, direction, manager) {
+    if (!manager?.requestDoor || !world?.getBlock) return false;
+    const reach = this.width / 2 + 0.45;
+    const x = Math.floor(this.position.x + direction.x * reach);
+    const z = Math.floor(this.position.z + direction.z * reach);
+    for (let dy = 0; dy <= 1; dy++) {
+      const y = Math.floor(this.position.y) + dy;
+      const state = decodeState(world.getBlock(x, y, z));
+      if (state?.type === 'door' && !state.open) {
+        manager.requestDoor(x, y, z, true);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Finds the bed a villager has claimed and settles onto it for the night. */
+  sleepInBed() {
+    if (!this.bed) return;
+    this.position.set(this.bed.x + 0.5, this.bed.y + 0.25, this.bed.z + 0.5);
+    this.velocity.set(0, 0, 0);
+    this.onGround = true;
+    this.sleeping = true;
+    this.state = 'sleep';
   }
 
   update(dt, world, player, manager) {
@@ -263,6 +299,18 @@ export class Entity {
 
     // A ridden mount is driven by rideUpdate() instead of its own AI.
     if (this.ridden) {
+      this.syncModel(dt);
+      return;
+    }
+
+    // Villagers only sleep at night; sunrise wakes them so they resume their
+    // rounds instead of lying in bed forever.
+    if (this.kind === 'villager' && this.sleeping && manager?.day !== false) {
+      this.sleeping = false;
+      this.bedTimer = 0;
+    }
+    if (this.sleeping) {
+      this.sleepInBed();
       this.syncModel(dt);
       return;
     }
@@ -404,6 +452,21 @@ export class Entity {
         if (distance > ANIMAL_TIMING.leashDistance) speed *= 1.6;
       }
     } else {
+      // At night a villager with a claimed bed walks home and lies down.
+      if (this.kind === 'villager' && manager?.day === false && this.bed) {
+        const bx = this.bed.x + 0.5 - this.position.x;
+        const bz = this.bed.z + 0.5 - this.position.z;
+        const bedDistance = Math.hypot(bx, bz);
+        if (bedDistance < 0.85 && Math.abs(this.position.y - this.bed.y) < 1.5) {
+          this.sleepInBed();
+          this.syncModel(dt);
+          return;
+        }
+        this.state = 'to_bed';
+        this.yaw = Math.atan2(-bx, -bz);
+        moveX = -Math.sin(this.yaw);
+        moveZ = -Math.cos(this.yaw);
+      }
       this.timer -= dt;
       if (this.timer <= 0) {
         this.timer = 2 + Math.random() * 4;
@@ -412,7 +475,7 @@ export class Entity {
       }
       // Villagers and farm animals with a home drift back towards it instead
       // of wandering off across the whole biome.
-      if (this.home) {
+      if (this.home && this.state !== 'to_bed') {
         const hx = this.home.x - this.position.x;
         const hz = this.home.z - this.position.z;
         const limit = this.kind === 'villager' ? 12 : 7;
@@ -428,7 +491,7 @@ export class Entity {
     }
 
     if (!this.aquatic && !this.flying) {
-      const steered = this.steerAround(world, moveX, moveZ, dt);
+      const steered = this.steerAround(world, moveX, moveZ, dt, manager);
       moveX = steered.x;
       moveZ = steered.z;
       if (steered.detour && this.state !== 'chase') {
@@ -877,6 +940,8 @@ export class Entity {
       woolTimer: this.woolTimer,
       sitting: this.sitting,
       home: this.home ? { x: this.home.x, z: this.home.z } : null,
+      bed: this.bed ? { x: this.bed.x, y: this.bed.y, z: this.bed.z } : null,
+      sleeping: this.sleeping,
     };
   }
 
