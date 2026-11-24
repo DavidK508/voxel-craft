@@ -63,6 +63,7 @@ const ID = {
   quartzOre: 54,
   redstoneOre: 182,
   endStone: 56,
+  obsidian: 25,
   hay: 60,
   wheatCrop: 64,
   carrotCrop: 65,
@@ -140,10 +141,12 @@ export class WorldGenerator {
     const detail = this.noise.erosion.fbm2(x * 0.022, z * 0.022, 3, 2, 0.5);
     const ridge = this.noise.mountains.ridged2(x * 0.0025 + 4.2, z * 0.0025 - 8.6, 5, 2, 0.5);
     const erosion = clamp(this.noise.erosion.fbm2(x * 0.0018 - 40.3, z * 0.0018 + 12.7, 4, 2, 0.5) * 0.5 + 0.5, 0, 1);
-    const mountainMask = smoothstep(0.46, 0.82, ridge * 0.68 + continent * 0.32) * (0.45 + erosion * 0.55);
+    // Mountains: a wider mask, a lower ridge threshold and a taller amplitude
+    // turn most highland regions into real ranges instead of gentle swells.
+    const mountainMask = smoothstep(0.26, 0.58, ridge * 0.75 + continent * 0.25) * (0.5 + erosion * 0.5);
 
-    let h = SEA_LEVEL + 6 + continent * 20 + hills * 7 + detail * 1.8;
-    h += Math.pow(Math.max(0, ridge - 0.38), 2.15) * 84 * mountainMask;
+    let h = SEA_LEVEL + 6 + continent * 20 + hills * 9 + detail * 1.8;
+    h += Math.pow(Math.max(0, ridge - 0.3), 1.6) * 210 * mountainMask;
     if (continent < -0.34) h -= (-continent - 0.34) * 75;
 
     // Soft plateaus and rolling lowlands make traversal more readable.
@@ -354,8 +357,10 @@ export class WorldGenerator {
           }
         }
 
-        // Carve caves. Surface is left mostly intact so entrances are rare but real.
-        const depth = height - 3;
+        // Carve caves. Surface is left mostly intact so entrances are rare but
+        // real, and floors below sea level keep a thick roof so a riverbed or
+        // ocean floor never breaks straight into a cave.
+        const depth = height - 3 - (height < SEA_LEVEL ? 4 : 0);
         if (depth > 5) {
           for (let y = 4; y <= depth; y++) {
             const current = blocks[localIndex(x, y, z)];
@@ -400,6 +405,20 @@ export class WorldGenerator {
             blocks[localIndex(x, SEA_LEVEL, z)] = ID.ice;
           }
         }
+      }
+    }
+
+    // Generation-time fluid pass: water settles into every cave cavity that
+    // opens into a water body, lava meeting water hardens into obsidian, and
+    // no air pocket may face open water (so riverbeds have no holes into caves).
+    this.settleFluids(blocks, heights, baseX, baseZ);
+
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        const wx = baseX + x;
+        const wz = baseZ + z;
+        const height = heights[x + z * CHUNK_SIZE];
+        const biome = biomes[x + z * CHUNK_SIZE];
 
         // Small clay patches at the edge of water.
         if (biome === BIOME.SWAMP && height <= SEA_LEVEL + 1 && hash2i(wx, wz, this.seed ^ 0x77aa) < 0.03) {
@@ -473,6 +492,99 @@ export class WorldGenerator {
     this.placeVillages(blocks, heights, cx, cz, baseX, baseZ);
 
     return { blocks, heights, biomes };
+  }
+
+  /**
+   * Generation-time water and lava physics.
+   *
+   * Water settles into every air cavity at or below sea level that connects to
+   * a water body, so a cave mouth under a river or ocean fills with water
+   * instead of showing a dark hole in the riverbed. Water cannot rise above
+   * the sea surface, so the fill stops at SEA_LEVEL. Lava that ends up
+   * touching water hardens into obsidian. Chunks generate independently, so
+   * the neighbour columns are described by their heights alone: a column
+   * outside this chunk holds water at y exactly when its floor is below y and
+   * y is still at or below sea level.
+   */
+  settleFluids(blocks, heights, baseX, baseZ) {
+    const localIndex = (x, y, z) => x + (z << 4) + (y << 8);
+    const wet = (id) => id === ID.water || id === ID.ice;
+    const columnWet = (wx, y, wz) => y <= SEA_LEVEL && y > 0 && this.heightAt(wx, wz) < y;
+    const seen = new Uint8Array(CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT);
+
+    // Seed the flood with existing water and with edge air cells whose
+    // out-of-chunk neighbour column holds water at the same height.
+    const queue = [];
+    const seed = (x, y, z) => {
+      const i = localIndex(x, y, z);
+      if (seen[i]) return;
+      seen[i] = 1;
+      if (blocks[i] === ID.air) blocks[i] = ID.water;
+      queue.push(i);
+    };
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        const edge = x === 0 || x === CHUNK_SIZE - 1 || z === 0 || z === CHUNK_SIZE - 1;
+        for (let y = 1; y <= SEA_LEVEL; y++) {
+          const id = blocks[localIndex(x, y, z)];
+          if (wet(id)) {
+            seed(x, y, z);
+          } else if (id === ID.air && edge) {
+            const outside = (x === 0 && columnWet(baseX - 1, y, baseZ + z))
+              || (x === CHUNK_SIZE - 1 && columnWet(baseX + CHUNK_SIZE, y, baseZ + z))
+              || (z === 0 && columnWet(baseX + x, y, baseZ - 1))
+              || (z === CHUNK_SIZE - 1 && columnWet(baseX + x, y, baseZ + CHUNK_SIZE));
+            if (outside) seed(x, y, z);
+          }
+        }
+      }
+    }
+
+    // Flood fill: water spreads sideways and down (and up to the sea surface)
+    // through every reachable air cell at or below sea level.
+    for (let head = 0; head < queue.length; head++) {
+      const i = queue[head];
+      const y = i >> 8;
+      const x = i & 15;
+      const z = (i >> 4) & 15;
+      const visit = (nx, ny, nz) => {
+        if (ny < 1 || ny > SEA_LEVEL) return;
+        const ni = localIndex(nx, ny, nz);
+        if (seen[ni] || blocks[ni] !== ID.air) return;
+        seen[ni] = 1;
+        blocks[ni] = ID.water;
+        queue.push(ni);
+      };
+      visit(x, y - 1, z);
+      visit(x, y + 1, z);
+      visit(x - 1, y, z);
+      visit(x + 1, y, z);
+      visit(x, y, z - 1);
+      visit(x, y, z + 1);
+    }
+
+    // Lava meeting water hardens into obsidian instead of hovering next to it.
+    for (let z = 0; z < CHUNK_SIZE; z++) {
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        const wx = baseX + x;
+        const wz = baseZ + z;
+        for (let y = 1; y <= SEA_LEVEL; y++) {
+          const i = localIndex(x, y, z);
+          if (blocks[i] !== ID.lava) continue;
+          const touches = wet(blocks[localIndex(Math.min(x + 1, CHUNK_SIZE - 1), y, z)])
+            || wet(blocks[localIndex(Math.max(x - 1, 0), y, z)])
+            || wet(blocks[localIndex(x, y, Math.min(z + 1, CHUNK_SIZE - 1))])
+            || wet(blocks[localIndex(x, y, Math.max(z - 1, 0))])
+            || wet(blocks[localIndex(x, Math.min(y + 1, SEA_LEVEL), z)])
+            || wet(blocks[localIndex(x, y - 1, z)])
+            || (x === 0 && columnWet(wx - 1, y, wz))
+            || (x === CHUNK_SIZE - 1 && columnWet(wx + 1, y, wz))
+            || (z === 0 && columnWet(wx, y, wz - 1))
+            || (z === CHUNK_SIZE - 1 && columnWet(wx, y, wz + 1));
+          if (touches) blocks[i] = ID.obsidian;
+        }
+      }
+    }
   }
 
   /* ------------------------------------------------------------------ */

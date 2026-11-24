@@ -157,4 +157,17 @@ export class AudioManager {
   playSplash() {
     this.burst({ frequency: 500, duration: 0.35, gain: 0.14, q: 0.3, type: 'lowpass' });
   }
+
+  /** Deep rumbling bang for creeper and dynamite detonations. */
+  playExplosion() {
+    this.burst({ frequency: 140, duration: 0.7, gain: 0.5, q: 0.4, type: 'lowpass' });
+    this.burst({ frequency: 700, duration: 0.3, gain: 0.25, q: 0.6 });
+    this.tone({ frequency: 60, duration: 0.5, gain: 0.22, type: 'square' });
+    this.tone({ frequency: 42, duration: 0.8, gain: 0.16, type: 'sine', delay: 0.05 });
+  }
+
+  /** Fast hiss while a creeper fuse or a primed dynamite counts down. */
+  playFuse() {
+    this.burst({ frequency: 3200, duration: 0.12, gain: 0.06, q: 1.6 });
+  }
 }

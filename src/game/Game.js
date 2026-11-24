@@ -18,6 +18,7 @@ import {
   getPistonId,
   getRepeaterId,
   getWallTorchId,
+  TNT_BLOCK,
 } from '../shared/blocks.js';
 import { loadAppearance, saveAppearance } from '../shared/appearance.js';
 import { getBiomeInfo } from '../shared/biomes.js';
@@ -275,6 +276,9 @@ export class Game {
     this.ambience = new Ambience(this.scene);
     this.rainbow = new Rainbow(this.scene);
     this.blockParticles = new BlockParticles(this.scene, this.assets);
+    // Primed dynamite (flashing fuse blocks) and expanding explosion flashes.
+    this.primedTnt = [];
+    this.explosionFlashes = [];
     this.selection = null;
     this.dimension = 'overworld';
     this.returnPoint = null;
@@ -1390,6 +1394,194 @@ export class Game {
     return true;
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Explosions: creepers and primed dynamite                            */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Detonates at (x, y, z): an expanding flash, a debris burst, synced
+   * removal of every breakable block in the radius and splash damage that
+   * falls off with distance. Bedrock, obsidian and fluids hold, and nearby
+   * dynamite chains instead of being destroyed.
+   */
+  explodeAt(x, y, z, { radius = 3.2, damage = 7, cause = 'взрыв' } = {}) {
+    if (!this.world) return 0;
+    const r = Math.max(1, Number(radius) || 3.2);
+    this.audio?.playExplosion?.();
+    this.spawnExplosionFlash(x, y, z, r);
+
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+    const cz = Math.floor(z);
+    const range = Math.ceil(r);
+    let removed = 0;
+    for (let dx = -range; dx <= range; dx++) {
+      for (let dy = -range; dy <= range; dy++) {
+        for (let dz = -range; dz <= range; dz++) {
+          const bx = cx + dx;
+          const by = cy + dy;
+          const bz = cz + dz;
+          if (by < 1 || by >= WORLD_HEIGHT) continue;
+          if (Math.hypot(bx + 0.5 - x, by + 0.5 - y, bz + 0.5 - z) > r) continue;
+          const id = this.world.getBlock(bx, by, bz);
+          if (!id) continue;
+          const block = getBlock(id);
+          if (block.fluid || block.hardness < 0) continue;
+          if (id === 25) continue; // obsidian shrugs off blasts
+          if (id === TNT_BLOCK) {
+            this.primeTntAt(bx, by, bz, 0.4 + Math.random() * 0.3);
+            continue;
+          }
+          if (!this.setBlockSynced(bx, by, bz, 0)) continue;
+          removed++;
+          if (Math.random() < 0.8) {
+            this.blockParticles?.burst(bx + 0.5, by + 0.5, bz + 0.5, id, 6);
+          }
+        }
+      }
+    }
+
+    // Splash damage for creatures and the player alike.
+    const reach = r + 1;
+    const falloff = (distance) => Math.max(1, Math.round(damage * (1 - distance / reach)));
+    for (const entity of this.entities?.entities ?? []) {
+      if (entity.dead) continue;
+      const distance = Math.hypot(
+        entity.position.x - x,
+        entity.position.y + entity.height * 0.5 - y,
+        entity.position.z - z,
+      );
+      if (distance > reach) continue;
+      entity.hit(falloff(distance), null);
+    }
+    if (this.player && !this.player.dead && !this.isCreative()) {
+      const distance = Math.hypot(
+        this.player.position.x - x,
+        this.player.position.y + 0.9 - y,
+        this.player.position.z - z,
+      );
+      if (distance <= reach) this.player.damage(falloff(distance), cause);
+    }
+    return removed;
+  }
+
+  /** Short white bloom that expands and fades where the blast went off. */
+  spawnExplosionFlash(x, y, z, radius) {
+    if (!this.scene) return;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 12, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xfff0c0,
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    mesh.position.set(x, y, z);
+    mesh.scale.setScalar(0.4);
+    this.scene.add(mesh);
+    this.explosionFlashes.push({ mesh, age: 0, life: 0.4, radius });
+    while (this.explosionFlashes.length > 12) {
+      const stale = this.explosionFlashes.shift();
+      this.scene.remove(stale.mesh);
+      stale.mesh.geometry.dispose();
+      stale.mesh.material.dispose();
+    }
+  }
+
+  /** Grows and fades every active explosion flash; called each frame. */
+  updateExplosionFlashes(dt) {
+    for (let i = this.explosionFlashes.length - 1; i >= 0; i--) {
+      const flash = this.explosionFlashes[i];
+      flash.age += dt;
+      const t = Math.min(1, flash.age / flash.life);
+      flash.mesh.scale.setScalar(0.4 + t * flash.radius * 1.5);
+      flash.mesh.material.opacity = 0.9 * (1 - t);
+      if (t < 1) continue;
+      this.scene.remove(flash.mesh);
+      flash.mesh.geometry.dispose();
+      flash.mesh.material.dispose();
+      this.explosionFlashes.splice(i, 1);
+    }
+  }
+
+  /** Builds the little flashing box that stands in for a primed dynamite. */
+  createTntMesh(x, y, z) {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(0.98, 0.98, 0.98),
+      new THREE.MeshBasicMaterial({ color: 0xc8342a }),
+    );
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 0.34, 1.0),
+      new THREE.MeshBasicMaterial({ color: 0xefe4c8 }),
+    );
+    group.add(body, band);
+    group.position.set(x + 0.5, y + 0.5, z + 0.5);
+    this.scene.add(group);
+    return group;
+  }
+
+  /** Turns a placed dynamite block into a flashing, ticking primed charge. */
+  primeTntAt(x, y, z, fuse = 1.5) {
+    if (!this.world || !this.scene) return false;
+    if (this.world.getBlock(x, y, z) !== TNT_BLOCK) return false;
+    if (this.primedTnt.some((t) => t.x === x && t.y === y && t.z === z)) return false;
+    if (!this.setBlockSynced(x, y, z, 0)) return false;
+    this.primedTnt.push({ x, y, z, fuse, mesh: this.createTntMesh(x, y, z), hiss: 0 });
+    this.audio?.playFuse?.();
+    return true;
+  }
+
+  /** Flashes, pulses and ticks every primed charge until it detonates. */
+  updatePrimedTnt(dt) {
+    for (let i = this.primedTnt.length - 1; i >= 0; i--) {
+      const tnt = this.primedTnt[i];
+      tnt.fuse -= dt;
+      tnt.hiss -= dt;
+      if (tnt.hiss <= 0) {
+        tnt.hiss = 0.3;
+        this.audio?.playFuse?.();
+      }
+      if (tnt.mesh) {
+        tnt.mesh.scale.setScalar(1 + 0.06 * Math.sin(tnt.fuse * 24));
+        const blink = Math.floor(Math.max(0, tnt.fuse) * 8) % 2 === 0;
+        tnt.mesh.children[0].material.color.setHex(blink ? 0xff5a40 : 0xa8281c);
+      }
+      if (tnt.fuse > 0) continue;
+      this.removePrimedTntMesh(tnt);
+      this.primedTnt.splice(i, 1);
+      this.explodeAt(tnt.x + 0.5, tnt.y + 0.5, tnt.z + 0.5, {
+        radius: 4.2,
+        damage: 12,
+        cause: 'взрыв динамита',
+      });
+    }
+  }
+
+  removePrimedTntMesh(tnt) {
+    if (!tnt.mesh) return;
+    this.scene.remove(tnt.mesh);
+    tnt.mesh.children[0].geometry.dispose();
+    tnt.mesh.children[0].material.dispose();
+    tnt.mesh.children[1].geometry.dispose();
+    tnt.mesh.children[1].material.dispose();
+    tnt.mesh = null;
+  }
+
+  /** Drops every primed charge and flash when leaving a world. */
+  clearPrimedTnt() {
+    for (const tnt of this.primedTnt) this.removePrimedTntMesh(tnt);
+    this.primedTnt.length = 0;
+    for (const flash of this.explosionFlashes) {
+      this.scene.remove(flash.mesh);
+      flash.mesh.geometry.dispose();
+      flash.mesh.material.dispose();
+    }
+    this.explosionFlashes.length = 0;
+  }
+
   updateNetwork(dt) {
     if (!this.net || !this.player) return;
     this.netSendTimer += dt;
@@ -1976,6 +2168,9 @@ export class Game {
       this.entities.onAttack = (attacker, target) => {
         if (target !== this.player) this.audio.playHit();
       };
+      // Creeper detonations become real explosions: blocks fly apart as
+      // debris, nearby entities take splash damage, primed dynamite chains.
+      this.entities.onExplode = (x, y, z, options) => this.explodeAt(x, y, z, options);
       this.selection = this.createSelectionBox();
 
       if (loadedSave) {
@@ -2280,6 +2475,7 @@ export class Game {
     this.ambience?.clear();
     this.rainbow?.reset();
     this.blockParticles?.clear();
+    this.clearPrimedTnt();
     if (this.materials) {
       this.materials.dispose();
       this.materials = null;
@@ -2732,6 +2928,8 @@ export class Game {
     this.fluids?.update(dt);
     this.redstone?.update(dt);
     this.updateFarming(dt);
+    this.updatePrimedTnt(dt);
+    this.updateExplosionFlashes(dt);
 
     this.entities?.update(dt, this.player, {
       timeOfDay: this.timeOfDay,
@@ -3025,6 +3223,10 @@ export class Game {
     }
 
     if (item.use === 'ignite') {
+      // Flint and steel primes dynamite first; otherwise it opens the portal.
+      if (target && target.id === TNT_BLOCK) {
+        return this.primeTntAt(target.x, target.y, target.z, 1.5);
+      }
       return this.ignitePortal(target);
     }
 

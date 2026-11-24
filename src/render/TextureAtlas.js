@@ -1121,6 +1121,27 @@ const PAINTERS = {
       }
     }
   },
+  // Dynamite: red casing with a lighter band, dark straps and a fuse knot.
+  tnt: (ctx, rng) => {
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) {
+        const shade = rng() > 0.8 ? 12 : 0;
+        pixel(ctx, x, y, 186 - shade, 44 - shade * 0.4, 36 - shade * 0.4);
+      }
+    }
+    // Paper band across the middle with the dark "TNT" stamp.
+    for (let y = 5; y <= 10; y++) {
+      for (let x = 0; x < 16; x++) pixel(ctx, x, y, 224, 214, 196);
+    }
+    for (const x of [3, 8, 12]) for (let y = 6; y <= 9; y++) pixel(ctx, x, y, 40, 34, 30);
+    pixel(ctx, 4, 6, 40, 34, 30); pixel(ctx, 4, 9, 40, 34, 30);
+    pixel(ctx, 9, 6, 40, 34, 30); pixel(ctx, 11, 6, 40, 34, 30);
+    // Dark straps and a shadowed top rim.
+    for (const y of [0, 15]) for (let x = 0; x < 16; x++) pixel(ctx, x, y, 120, 26, 22);
+    for (const x of [0, 15]) for (let y = 0; y < 16; y++) pixel(ctx, x, y, 132, 30, 24);
+    for (let x = 7; x <= 8; x++) pixel(ctx, x, 1, 60, 52, 44);
+    pixel(ctx, 8, 2, 46, 40, 34);
+  },
 };
 
 function makeCanvas(size = SIZE) {

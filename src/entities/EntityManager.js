@@ -58,6 +58,8 @@ export class EntityManager {
     this.onBossSpawn = null;
     this.onBossDefeat = null;
     this.onDoorRequest = null;
+    /** Game hook: creeper detonations call this with the world position. */
+    this.onExplode = null;
   }
 
   add(entity) {

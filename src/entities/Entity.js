@@ -541,7 +541,7 @@ export class Entity {
     }
 
     this.syncModel(dt);
-    if (this.hostile && this.mob.explodes) this.updateFuse(dt, this.huntTarget, player);
+    if (this.hostile && this.mob.explodes) this.updateFuse(dt, this.huntTarget, player, manager);
   }
 
   /** Fish and axolotls swim, then flop toward the nearest water when stranded. */
@@ -720,7 +720,7 @@ export class Entity {
     this.syncModel(dt);
   }
 
-  updateFuse(dt, target, player) {
+  updateFuse(dt, target, player, manager = null) {
     if (!target || target.dead) {
       this.fuse = Math.max(0, this.fuse - dt);
       return;
@@ -729,8 +729,21 @@ export class Entity {
     const distance = this.distanceTo(target);
     if (distance < 2.4 && (!isPlayer || !player.creative)) {
       this.fuse += dt;
+      this.fuseSfx = (this.fuseSfx ?? 0) - dt;
+      if (this.fuseSfx <= 0) {
+        this.fuseSfx = 0.35;
+        manager?.audio?.playFuse?.();
+      }
       if (this.fuse > 1.3) {
-        if (isPlayer) player.damage(6, 'взрыв крипера');
+        // The game layer owns the world effect: block removal, debris, flash
+        // and splash damage. Without it fall back to the old point-blank hit.
+        if (manager?.onExplode) {
+          manager.onExplode(this.position.x, this.position.y + this.height * 0.5, this.position.z, {
+            radius: 3.2,
+            damage: 7,
+            cause: 'взрыв крипера',
+          });
+        } else if (isPlayer) player.damage(6, 'взрыв крипера');
         else target.hit(6, this);
         this.dead = true;
         this.exploded = true;

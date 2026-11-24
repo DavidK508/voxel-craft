@@ -264,7 +264,7 @@ function makeSetWorld(solids) {
 const noInput = { isDown: () => false, isMouseDown: () => false };
 
 await test('block registry is complete and immutable', () => {
-  assert.equal(BLOCK_DEFS.length, 204);
+  assert.equal(BLOCK_DEFS.length, 205);
   assert.equal(getBlock(0).key, 'air');
   assert.equal(getBlock(1).key, 'stone');
   assert.equal(getBlock(999).key, 'air');
@@ -921,7 +921,7 @@ await test('emissive blocks bake block light into the mesh', () => {
 });
 
 await test('decorative blocks use rectangular, non-cube geometry', () => {
-  assert.equal(TEXTURE_COUNT, 116);
+  assert.equal(TEXTURE_COUNT, 117);
   for (const name of ['bed_top', 'bed_side', 'torch_stick', 'torch_flame', 'oak_fence',
     'door_bottom', 'door_top', 'lever_off', 'button_off', 'plate_off', 'wire_off',
     'repeater_off', 'piston_side', 'lamp_off', 'redstone_block', 'redstone_ore']) {
@@ -2749,6 +2749,192 @@ await test('spears, bows and arrows extend the weapon roster', async () => {
   assert.equal(consumed, 1, 'a bow shot consumes one arrow');
   assert.ok(reach >= 12, 'bows reach farther than melee weapons');
   assert.equal(attack.tool.type, 'bow');
+});
+
+await test('riverbeds are sealed and fluids settle during world generation', () => {
+  let exposedAir = 0;
+  let lavaOnWater = 0;
+  let caveWater = 0;
+  let waterCells = 0;
+  for (const seed of [0x1234abcd, 424242]) {
+    for (let cx = -2; cx <= 2; cx++) {
+      for (let cz = -2; cz <= 2; cz++) {
+        const { blocks, heights } = generateChunk(cx, cz, seed);
+        for (let z = 0; z < CHUNK_SIZE; z++) {
+          for (let x = 0; x < CHUNK_SIZE; x++) {
+            const floor = heights[x + z * CHUNK_SIZE];
+            for (let y = 1; y <= SEA_LEVEL; y++) {
+              const id = blocks[localIndex(x, y, z)];
+              const wetNeighbor = (nx, ny, nz) => {
+                if (nx < 0 || nx >= CHUNK_SIZE || nz < 0 || nz >= CHUNK_SIZE || ny < 1 || ny > SEA_LEVEL) return false;
+                const n = blocks[localIndex(nx, ny, nz)];
+                return n === 11 || n === 19;
+              };
+              const side = wetNeighbor(x + 1, y, z) || wetNeighbor(x - 1, y, z)
+                || wetNeighbor(x, y, z + 1) || wetNeighbor(x, y, z - 1);
+              if (id === 0) {
+                // No air pocket may face open water: that is the "hole into a
+                // cave" you could see in a riverbed or ocean floor.
+                if (side || wetNeighbor(x, y + 1, z)) exposedAir++;
+              } else if (id === 30 && (side || wetNeighbor(x, y + 1, z))) {
+                lavaOnWater++;
+              } else if (id === 11) {
+                waterCells++;
+                // Water above its own column floor can only come from the
+                // generation-time flood filling a cave cavity.
+                if (floor >= y && y < SEA_LEVEL) caveWater++;
+                // Unsupported water (air hanging underneath) is unphysical.
+                if (y < SEA_LEVEL && blocks[localIndex(x, y + 1, z)] === 0) exposedAir++;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.equal(exposedAir, 0, 'no generated air cell may touch water at or below sea level');
+  assert.equal(lavaOnWater, 0, 'lava touching generated water must harden into obsidian');
+  assert.ok(waterCells > 20000, `expected real water bodies, found ${waterCells} cells`);
+  assert.ok(caveWater > 0, 'water physics must flood cave cavities below sea level');
+});
+
+await test('the overworld raises tall mountain ranges', () => {
+  const generator = new WorldGenerator(2266711628);
+  let max = 0;
+  let min = WORLD_HEIGHT;
+  let above112 = 0;
+  let above128 = 0;
+  let belowSea = 0;
+  let n = 0;
+  for (let x = -1500; x <= 1500; x += 10) {
+    for (let z = -1500; z <= 1500; z += 10) {
+      const h = generator.heightAt(x, z);
+      n++;
+      if (h > max) max = h;
+      if (h < min) min = h;
+      if (h > 112) above112++;
+      if (h > 128) above128++;
+      if (h < SEA_LEVEL) belowSea++;
+    }
+  }
+  assert.ok(max >= 150, `mountain peaks should tower well above the old cap, got ${max}`);
+  assert.ok(above128 > 0, 'snow-capped summits must exist above the snow line');
+  assert.ok(above112 / n > 0.01, `mountains biome should cover real ranges, got ${(above112 / n * 100).toFixed(2)}%`);
+  assert.ok(belowSea / n > 0.05, 'oceans and rivers must survive the height changes');
+  assert.ok(min >= 6 && max < WORLD_HEIGHT - 18, 'heights stay inside the clamped build range');
+});
+
+await test('dynamite has a block, texture, item and recipe', () => {
+  const tnt = getBlock(205);
+  assert.equal(tnt.key, 'tnt');
+  assert.equal(tnt.name, 'Динамит');
+  assert.equal(tnt.faceTiles[0], TILE.tnt);
+  assert.ok(TILE.tnt < TEXTURE_COUNT, 'the tnt tile belongs to the atlas');
+  const item = getItem(205);
+  assert.equal(item.placeBlock, 205, 'block items are derived automatically');
+  const recipe = findRecipe([424, 8, 424, 8, 424, 8, 424, 8, 424], 3);
+  assert.equal(recipe.result.id, 205, 'five gunpowder and four sand craft dynamite');
+  assert.equal(recipe.result.count, 1);
+});
+
+await test('explosions remove blocks, spare bedrock and chain into dynamite', async () => {
+  globalThis.location ??= { search: '' };
+  const { Game } = await import('../src/game/Game.js');
+  const key = (x, y, z) => `${x},${y},${z}`;
+  const storage = new Map([
+    [key(0, 5, 0), 1],
+    [key(1, 5, 0), 13],
+    [key(0, 4, 0), 11],
+    [key(0, 5, 1), 25],
+    [key(2, 5, 0), 205],
+  ]);
+  const bursts = [];
+  const sounds = [];
+  const damageTaken = [];
+  const flashes = [];
+  const game = {
+    world: {
+      getBlock: (x, y, z) => storage.get(key(x, y, z)) ?? 0,
+      setBlock(x, y, z, id) { storage.set(key(x, y, z), id); return true; },
+    },
+    scene: { add() {}, remove() {} },
+    audio: {
+      playExplosion() { sounds.push('boom'); },
+      playFuse() { sounds.push('hiss'); },
+    },
+    blockParticles: { burst(...args) { bursts.push(args); } },
+    entities: null,
+    player: {
+      position: { x: 0.5, y: 5.5, z: 2.5 },
+      dead: false,
+      damage(amount, cause) { damageTaken.push([amount, cause]); },
+    },
+    isCreative: () => false,
+    net: null,
+    primedTnt: [],
+    explosionFlashes: [],
+    sendNetworkEdit() {},
+    setBlockSynced: Game.prototype.setBlockSynced,
+    explodeAt: Game.prototype.explodeAt,
+    spawnExplosionFlash: Game.prototype.spawnExplosionFlash,
+    primeTntAt: Game.prototype.primeTntAt,
+    createTntMesh: Game.prototype.createTntMesh,
+    removePrimedTntMesh: Game.prototype.removePrimedTntMesh,
+    updatePrimedTnt: Game.prototype.updatePrimedTnt,
+  };
+
+  const removed = Game.prototype.explodeAt.call(game, 0.5, 5.5, 0.5, { radius: 2, damage: 7 });
+  assert.ok(removed >= 1, 'the blast must clear breakable blocks');
+  assert.equal(game.world.getBlock(0, 5, 0), 0, 'stone at the centre is gone');
+  assert.equal(game.world.getBlock(1, 5, 0), 13, 'bedrock survives');
+  assert.equal(game.world.getBlock(0, 4, 0), 11, 'water survives');
+  assert.equal(game.world.getBlock(0, 5, 1), 25, 'obsidian survives');
+  assert.equal(bursts.length, removed, 'every removed block sprays debris');
+  assert.ok(sounds.includes('boom'), 'the explosion is audible');
+  assert.equal(damageTaken.length, 1, 'the player takes splash damage');
+  assert.ok(damageTaken[0][0] >= 1 && damageTaken[0][0] <= 7, 'damage falls off with distance');
+  assert.equal(game.explosionFlashes.length, 1, 'a flash bloom animates the blast');
+  assert.equal(game.primedTnt.length, 1, 'nearby dynamite chains instead of dying');
+  assert.equal(game.primedTnt[0].x, 2, 'the chained charge takes over the block position');
+  assert.equal(game.world.getBlock(2, 5, 0), 0, 'the primed charge is now an entity');
+
+  // The fuse counts down, flashes and detonates the chained charge.
+  game.primedTnt[0].fuse = 0.01;
+  storage.set(key(1, 4, 0), 1);
+  Game.prototype.updatePrimedTnt.call(game, 0.02);
+  assert.equal(game.primedTnt.length, 0, 'the charge detonates and is removed');
+  assert.equal(game.world.getBlock(1, 4, 0), 0, 'the chained explosion removes new blocks too');
+  assert.equal(game.explosionFlashes.length, 2, 'each detonation flashes');
+  Game.prototype.updateExplosionFlashes.call(game, 1);
+  assert.equal(game.explosionFlashes.length, 0, 'expired flashes are cleaned up');
+});
+
+await test('a creeper fuse calls the game explosion hook', async () => {
+  const manager = new EntityManager({ scene: { add() {} }, world: makeFlatWorld(5), drops: null, seed: 13 });
+  const creeper = manager.spawnMob('creeper', 0.5, 6.02, 0.5);
+  assert.ok(MOBS.creeper.explodes, 'creepers still carry the explodes flag');
+  const events = [];
+  manager.onExplode = (x, y, z, options) => events.push({ x, y, z, options });
+  const player = { position: { x: 0.5, y: 6, z: 1.2 }, creative: false, dead: false };
+  creeper.updateFuse(1.4, player, player, manager);
+  assert.equal(events.length, 1, 'the detonation reaches the game layer');
+  assert.ok(Math.abs(events[0].x - 0.5) < 0.01, 'the explosion happens where the creeper stood');
+  assert.ok(events[0].options.radius > 2, 'creepers blast a pocket, not a point');
+  assert.equal(creeper.dead, true);
+  assert.equal(creeper.exploded, true, 'exploded creepers skip their loot drop');
+
+  // Without the hook the old point-blank damage still applies.
+  const plain = new EntityManager({ scene: { add() {} }, world: makeFlatWorld(5), drops: null, seed: 14 });
+  const lone = plain.spawnMob('creeper', 0.5, 6.02, 0.5);
+  let hit = null;
+  const victim = {
+    position: { x: 0.5, y: 6, z: 1.2 },
+    creative: false,
+    damage(amount, cause) { hit = { amount, cause }; },
+  };
+  lone.updateFuse(1.4, victim, victim, plain);
+  assert.ok(hit && hit.cause.includes('крипер'), 'the fallback still wounds the target');
+  assert.equal(lone.exploded, true);
 });
 
 console.log(`\n${results.length - failed}/${results.length} tests passed.`);

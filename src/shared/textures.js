@@ -120,6 +120,8 @@ export const TEXTURE_NAMES = [
   'dandelion',
   'poppy',
   'dead_bush',
+  // Explosives: dynamite block used by primed TNT.
+  'tnt',
 ];
 
 export const TILE = Object.freeze(

@@ -3,6 +3,9 @@ import { CHEST_BLOCK } from './storage.js';
 
 export const AIR = 0;
 
+/** Free block id for dynamite; primed copies of it explode in Game. */
+export const TNT_BLOCK = 205;
+
 const all = (tile) => [tile, tile, tile, tile, tile, tile];
 const topBottomSide = (top, bottom, side) => [top, bottom, side, side, side, side];
 
@@ -541,6 +544,15 @@ const defs = [
     faceTiles: all(TILE.dead_bush), drops: [{ id: 400, count: 1 }],
     solid: false, opaque: false, cutout: true, renderLayer: 'cutout',
     mergeSides: false, crossHeight: 0.6,
+  },
+
+  // --- Explosives -----------------------------------------------------------
+  // Primed with flint and steel: the block is replaced by a flashing fuse
+  // entity that removes surrounding blocks when it detonates.
+  {
+    id: TNT_BLOCK, key: 'tnt', name: 'Динамит', hardness: 0.5,
+    faceTiles: all(TILE.tnt), drops: [{ id: TNT_BLOCK, count: 1 }],
+    mergeSides: false,
   },
 ];
 

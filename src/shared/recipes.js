@@ -98,6 +98,8 @@ export const RECIPES = Object.freeze([
   { id: 'horse_armor', pattern: ['L L', 'LLL', 'LLL'], key: { L: 420 }, result: { id: 444, count: 1 } },
   { id: 'string_from_wool', shapeless: [{ any: [42] }], result: { id: 423, count: 4 } },
   { id: 'torch', shapeless: [{ any: [401] }, { any: [400] }], result: { id: 63, count: 4 } },
+  // Dynamite: five gunpowder and four sand in a checkerboard.
+  { id: 'tnt', pattern: ['GSG', 'SGS', 'GSG'], key: { G: ITEM_IDS.GUNPOWDER, S: 8 }, result: { id: 205, count: 1 } },
   // A bed is three wool above three planks, just like Minecraft.
   { id: 'bed', pattern: ['WWW', 'PPP'], key: { W: 42, P: 5 }, result: { id: 69, count: 1 } },
   // Ranged weapons: arrows from flint, wooden sticks and feathers.
