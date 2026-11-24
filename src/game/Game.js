@@ -1434,6 +1434,10 @@ export class Game {
           }
           if (!this.setBlockSynced(bx, by, bz, 0)) continue;
           removed++;
+          // The fresh hole wakes neighbouring water: natural sources are
+          // adopted as endless and pour into the crater instead of staying
+          // frozen behind the wall that just blew up.
+          this.fluids?.wake(bx, by, bz);
           if (Math.random() < 0.8) {
             this.blockParticles?.burst(bx + 0.5, by + 0.5, bz + 0.5, id, 6);
           }
@@ -3124,7 +3128,7 @@ export class Game {
         if (!this.containers.isLooted(target.x, target.y, target.z)
           && slots.every((stack) => stack === null)
           && nearbyVillages(target.x, target.z, this.world.seed).some((village) => (
-            Math.abs(village.x - target.x) <= 28 && Math.abs(village.z - target.z) <= 28
+            Math.abs(village.x - target.x) <= 44 && Math.abs(village.z - target.z) <= 44
           ))) {
           villageChestLoot(target.x, target.y, target.z).forEach((stack, index) => {
             if (stack) slots[index] = stack;

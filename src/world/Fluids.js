@@ -48,7 +48,14 @@ export class FluidSimulation {
 
   claimNatural(x, y, z) {
     const id = this.world.getBlock(x, y, z);
-    if (!isFluid(id)) return;
+    if (!isFluid(id)) {
+      // If the block is air (e.g. just removed by an explosion), add the cell
+      // to the queue so the update loop can flow water into it from neighbours.
+      const key = keyOf(x, y, z);
+      this.levels.set(key, 0);
+      this.queue.add(key);
+      return;
+    }
     const key = keyOf(x, y, z);
     if (this.levels.has(key)) {
       this.queue.add(key);

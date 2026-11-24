@@ -671,12 +671,12 @@ export class WorldGenerator {
 
   /** Villages whose footprint touches this chunk. */
   villagesNearChunk(cx, cz) {
-    // Villages include a crop garden, livestock farm and houses out to about
-    // 28 blocks from the centre, so look a little further than the old plaza.
-    const minX = cx * CHUNK_SIZE - 36;
-    const maxX = (cx + 1) * CHUNK_SIZE + 36;
-    const minZ = cz * CHUNK_SIZE - 36;
-    const maxZ = (cz + 1) * CHUNK_SIZE + 36;
+    // Villages reach about 40 blocks from the centre (houses, garden,
+    // paddock and lanes), so look a little further than that.
+    const minX = cx * CHUNK_SIZE - 44;
+    const maxX = (cx + 1) * CHUNK_SIZE + 44;
+    const minZ = cz * CHUNK_SIZE - 44;
+    const maxZ = (cz + 1) * CHUNK_SIZE + 44;
     const found = [];
     const firstCellX = Math.floor(minX / VILLAGE_CELL);
     const lastCellX = Math.floor(maxX / VILLAGE_CELL);
@@ -693,45 +693,50 @@ export class WorldGenerator {
     return found;
   }
 
+  /** House footprints, shared plots and their levels, cached on the village record. */
   /**
-   * Low-frequency, deterministic terrace offset for a village column. The
-   * smooth waves keep neighbouring columns within one block of each other, so
-   * paths stay climbable while the settlement still sits on uneven ground.
+   * House footprints and the shared plaza, crop garden and livestock paddock,
+   * cached on the village record. The settlement is bigger than before — up to
+   * 14 houses inside a 40-block radius — and everything is fitted to the raw
+   * terrain: a floor meets the ground at its doorstep, each shared plot levels
+   * only its own rectangle, and the ground in between keeps its natural shape.
    */
-  villageTerraceOffset(village, wx, wz) {
-    const dx = wx - village.x;
-    const dz = wz - village.z;
-    const dist = Math.hypot(dx, dz);
-    // The well, crop garden and livestock paddock remain level and usable.
-    if (dist <= 8) return 0;
-    if (dx >= 13 && dx <= 24 && dz >= -9 && dz <= 9) return 0;
-    if (dz >= 13 && dz <= 20 && dx >= -8 && dx <= 8) return 0;
-    const phaseA = (this.seed >>> 0) * 0.000017;
-    const phaseB = village.x * 0.017 + village.z * 0.011;
-    const weight = clamp((dist - 8) / 22, 0, 1);
-    const field = Math.sin(wx * 0.07 + phaseA) + Math.cos(wz * 0.083 + phaseB);
-    return Math.round(clamp(field * weight, -2, 2));
-  }
-
-  /** House footprints and their terrace heights, cached on the village record. */
   villagePlan(village) {
     if (village.layout) return village.layout;
-    const { x: vx, z: vz, y: base } = village;
-    const radius = 28;
+    const { x: vx, z: vz } = village;
+    const radius = 40;
     const houseStyles = [
-      { w: 7, d: 6, style: 0 },
-      { w: 6, d: 6, style: 1 },
-      { w: 6, d: 7, style: 2 },
-      { w: 8, d: 5, style: 3 },
-      { w: 5, d: 8, style: 4 },
-      { w: 7, d: 7, style: 5 },
-      { w: 6, d: 5, style: 6 },
+      { w: 7, d: 6, style: 0 },  // plank cottage
+      { w: 6, d: 6, style: 1 },  // A-frame with a red roof
+      { w: 6, d: 7, style: 2 },  // stone-brick townhouse
+      { w: 8, d: 5, style: 3 },  // log cabin
+      { w: 5, d: 8, style: 4 },  // wool cottage with a blue roof
+      { w: 7, d: 7, style: 5 },  // hedge manor, tall and pitched
+      { w: 6, d: 5, style: 6 },  // brick workshop with a chimney
+      { w: 7, d: 6, style: 7 },  // library
+      { w: 6, d: 6, style: 8 },  // blacksmith
+      { w: 8, d: 6, style: 9 },  // barn with a red roof
+      { w: 5, d: 7, style: 10 }, // two-storey stone townhouse
+      { w: 6, d: 6, style: 11 }, // terracotta cottage
+      { w: 6, d: 5, style: 1 },  // small A-frame
+      { w: 5, d: 7, style: 10 }, // slim townhouse
     ];
-    const reserved = [
-      { x0: vx - 6, z0: vz - 6, x1: vx + 6, z1: vz + 6 },
-      { x0: vx - 9, z0: vz + 11, x1: vx + 9, z1: vz + 21 },
-      { x0: vx + 12, z0: vz - 9, x1: vx + 24, z1: vz + 9 },
-    ];
+    // The three shared areas level their own rectangle onto the terrain at
+    // their centre (never below the water line); houses level themselves.
+    const dry = (h) => Math.max(h, SEA_LEVEL + 2);
+    const plaza = {
+      x0: vx - 4, z0: vz - 4, x1: vx + 4, z1: vz + 4,
+      y: dry(this.heightAt(vx, vz)),
+    };
+    const garden = {
+      x0: vx - 7, z0: vz + 13, x1: vx + 9, z1: vz + 19,
+      y: dry(this.heightAt(vx, vz + 16)),
+    };
+    const farm = {
+      x0: vx + 14, z0: vz - 7, x1: vx + 22, z1: vz + 7,
+      y: dry(this.heightAt(vx + 18, vz)),
+    };
+    const reserved = [plaza, garden, farm];
     const overlaps = (a, b, margin) => (
       a.x0 - margin <= b.x1 && a.x1 + margin >= b.x0
       && a.z0 - margin <= b.z1 && a.z1 + margin >= b.z0
@@ -741,11 +746,8 @@ export class WorldGenerator {
       && rect.z0 >= vz - radius + 2 && rect.z1 <= vz + radius - 2
     );
     const candidates = [];
-    for (let oz = -20; oz <= 9; oz += 5) {
-      for (let ox = -23; ox <= 9; ox += 5) candidates.push({ ox, oz });
-    }
-    for (let ox = -20; ox <= 8; ox += 7) {
-      candidates.push({ ox, oz: -26 }, { ox, oz: -21 }, { ox, oz: 23 }, { ox, oz: 26 });
+    for (let oz = -34; oz <= 34; oz += 6) {
+      for (let ox = -34; ox <= 34; ox += 6) candidates.push({ ox, oz });
     }
     candidates.sort((a, b) => {
       const score = (c, salt) => Math.hypot(c.ox + 3, c.oz + 3)
@@ -772,30 +774,56 @@ export class WorldGenerator {
         if (!inside(rect)) continue;
         if (reserved.some((zone) => overlaps(rect, zone, 1))) continue;
         if (houses.some((house) => overlaps(rect, house.rect, 1))) continue;
-        const centreX = vx + cand.ox + (def.w - 1) / 2;
-        const centreZ = vz + cand.oz + (def.d - 1) / 2;
+        // Dry, gentle ground only: a house may not stand in water or straddle
+        // a cliff, which keeps foundations to a believable depth.
+        let lo = Infinity;
+        let hi = -Infinity;
+        let onLand = true;
+        for (let z = rect.z0; z <= rect.z1 && onLand; z++) {
+          for (let x = rect.x0; x <= rect.x1; x++) {
+            const h = this.heightAt(x, z);
+            if (h <= SEA_LEVEL + 1) { onLand = false; break; }
+            lo = Math.min(lo, h);
+            hi = Math.max(hi, h);
+          }
+        }
+        if (!onLand || hi - lo > 5) continue;
+        const door = doorTowardsPlaza(cand.ox, cand.oz, def.w, def.d);
+        const doorX = door === 1 ? def.w - 1 : door === 3 ? 0 : Math.floor(def.w / 2);
+        const doorZ = door === 0 ? 0 : door === 2 ? def.d - 1 : Math.floor(def.d / 2);
+        const stepX = door === 1 ? 1 : door === 3 ? -1 : 0;
+        const stepZ = door === 2 ? 1 : door === 0 ? -1 : 0;
+        // The floor sits near the middle of the footprint but never more than
+        // one block off the doorstep, so the lane walks straight in.
+        const outside = this.heightAt(vx + cand.ox + doorX + stepX, vz + cand.oz + doorZ + stepZ);
+        const base = clamp(Math.round((lo + hi) / 2), outside - 1, outside + 1);
         houses.push({
           ...def,
           ox: cand.ox,
           oz: cand.oz,
-          door: doorTowardsPlaza(cand.ox, cand.oz, def.w, def.d),
-          rect,
-          base: base + clamp(this.villageTerraceOffset(village, centreX, centreZ), -1, 2),
+          door,
+          rect: { ...rect, y: base },
+          base,
         });
         break;
       }
     }
-    village.layout = { houses };
+    village.layout = {
+      houses,
+      plaza,
+      garden,
+      farm,
+      plots: [plaza, garden, farm, ...houses.map((house) => house.rect)],
+    };
     return village.layout;
   }
 
-  /** Final ground height at a village column, including house terraces. */
+  /** Final ground height at a village column: a plot level or raw terrain. */
   villageSurfaceY(village, wx, wz) {
-    for (const house of this.villagePlan(village).houses) {
-      if (wx >= house.rect.x0 - 1 && wx <= house.rect.x1 + 1
-        && wz >= house.rect.z0 - 1 && wz <= house.rect.z1 + 1) return house.base;
+    for (const plot of this.villagePlan(village).plots) {
+      if (wx >= plot.x0 && wx <= plot.x1 && wz >= plot.z0 && wz <= plot.z1) return plot.y;
     }
-    return village.y + this.villageTerraceOffset(village, wx, wz);
+    return this.heightAt(wx, wz);
   }
 
   placeVillages(blocks, heights, cx, cz, baseX, baseZ) {
@@ -808,57 +836,34 @@ export class WorldGenerator {
       if (y < 0 || y >= WORLD_HEIGHT) return;
       blocks[lx + (lz << 4) + (y << 8)] = id;
     };
-    const getWorld = (wx, y, wz) => {
-      const lx = wx - baseX;
-      const lz = wz - baseZ;
-      if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) return 0;
-      if (y < 0 || y >= WORLD_HEIGHT) return 0;
-      return blocks[lx + (lz << 4) + (y << 8)];
-    };
-    for (const village of villages) this.buildVillage(village, setWorld, getWorld);
-    // Refresh column tops to the terraced village surface, not a single plane.
+    for (const village of villages) this.buildVillage(village, setWorld);
+    // Column tops only change where a plot was actually levelled; every other
+    // column keeps the terrain height the height pass already computed.
     for (const village of villages) {
-      const radius = 28;
-      for (let dz = -radius; dz <= radius; dz++) {
-        for (let dx = -radius; dx <= radius; dx++) {
-          if (dx * dx + dz * dz > radius * radius + 6) continue;
-          const wx = village.x + dx;
-          const wz = village.z + dz;
-          const lx = wx - baseX;
-          const lz = wz - baseZ;
-          if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) continue;
-          const index = lx + lz * CHUNK_SIZE;
-          heights[index] = this.villageSurfaceY(village, wx, wz);
+      for (const plot of this.villagePlan(village).plots) {
+        for (let wz = plot.z0; wz <= plot.z1; wz++) {
+          for (let wx = plot.x0; wx <= plot.x1; wx++) {
+            const lx = wx - baseX;
+            const lz = wz - baseZ;
+            if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE) continue;
+            heights[lx + lz * CHUNK_SIZE] = plot.y;
+          }
         }
       }
     }
   }
 
-  buildVillage(village, set, get) {
-    const { x: vx, z: vz, y: base } = village;
+  buildVillage(village, set) {
+    const { x: vx, z: vz } = village;
     const desert = village.biome === BIOME.DESERT;
     const ground = desert ? ID.sand : ID.grass;
     const sub = desert ? ID.sand : ID.dirt;
-    const radius = 28;
-
     const plan = this.villagePlan(village);
 
-    // Terrace the settlement into the landscape instead of flattening one huge
-    // plane: each column gets its own surface from the deterministic field,
-    // and house plots are levelled onto their own step.
-    for (let dz = -radius; dz <= radius; dz++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (dx * dx + dz * dz > radius * radius + 6) continue;
-        const wx = vx + dx;
-        const wz = vz + dz;
-        const surface = this.villageSurfaceY(village, wx, wz);
-        for (let y = surface - 3; y <= surface; y++) set(wx, y, wz, y === surface ? ground : sub);
-        for (let y = surface + 1; y <= base + 14; y++) {
-          const existing = get(wx, y, wz);
-          if (existing !== ID.air) set(wx, y, wz, ID.air);
-        }
-      }
-    }
+    // Level only the plots that stand on them — houses, plaza, garden and
+    // paddock. Lanes and empty lots keep the natural ground, so the village
+    // follows the landscape instead of sitting on a flattened disc.
+    for (const plot of plan.plots) this.levelPlot(plot, set, ground, sub);
 
     for (const house of plan.houses) {
       this.buildHouse(
@@ -867,6 +872,7 @@ export class WorldGenerator {
       );
     }
 
+    const base = plan.plaza.y;
     // Well in the middle of the plaza, with a wooden rim above the cobble.
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
@@ -893,24 +899,43 @@ export class WorldGenerator {
       set(wx, base + 3, wz, 29);
     }
 
-    this.buildGarden(vx, vz, base, set, desert);
-    this.buildFarm(vx, vz, base, set, desert);
-    this.buildVillagePaths(village, set, desert, plan.houses);
+    this.buildGarden(vx, vz, plan.garden.y, set, desert);
+    this.buildFarm(vx, vz, plan.farm.y, set, desert);
+    this.buildVillagePaths(village, set, desert, plan);
   }
 
-  /** Gravel/sandstone lanes from the well to every house, following the terraces. */
-  buildVillagePaths(village, set, desert, houses) {
+  /**
+   * Flattens a single plot rectangle onto its own level: high ground is cut
+   * back, low ground is filled with subsoil up to a grass/sand surface, and
+   * whatever stood on the plot (trees, old fill) is cleared away. The fill
+   * starts at the raw terrain, so foundations always reach real ground.
+   */
+  levelPlot(plot, set, ground, sub) {
+    const { x0, z0, x1, z1, y: level } = plot;
+    for (let z = z0; z <= z1; z++) {
+      for (let x = x0; x <= x1; x++) {
+        const h = this.heightAt(x, z);
+        for (let y = level + 1; y <= Math.max(h, level) + 14; y++) set(x, y, z, ID.air);
+        if (h < level) {
+          for (let y = h + 1; y < level; y++) set(x, y, z, sub);
+        }
+        set(x, level, z, ground);
+      }
+    }
+  }
+
+  /** Gravel/sandstone lanes from the well to every house, on natural ground. */
+  buildVillagePaths(village, set, desert, plan) {
     const { x: vx, z: vz } = village;
     const paving = desert ? ID.sandstone : ID.gravel;
     const pave = (x, z) => {
-      const dx = x - vx;
-      const dz = z - vz;
-      if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) return; // keep the well clear
-      if (dx >= 14 && dx <= 22 && dz >= -7 && dz <= 7) return; // leave the paddock alone
-      if (dz >= 14 && dz <= 18 && dx >= -6 && dx <= 6) return; // leave the crops alone
-      if (houses.some((h) => x >= vx + h.ox && x <= vx + h.ox + h.w - 1
-        && z >= vz + h.oz && z <= vz + h.oz + h.d - 1)) return;
-      const surface = this.villageSurfaceY(village, x, z);
+      // Lanes only touch untouched ground: plots keep their own level and
+      // meet the path with a step, the way a village sits on a slope.
+      if (plan.plots.some((plot) => (
+        x >= plot.x0 && x <= plot.x1 && z >= plot.z0 && z <= plot.z1
+      ))) return;
+      const surface = this.heightAt(x, z);
+      if (surface <= SEA_LEVEL) return; // no lanes under water
       set(x, surface - 1, z, desert ? ID.sand : ID.dirt);
       set(x, surface, z, paving);
     };
@@ -932,7 +957,7 @@ export class WorldGenerator {
       }
     };
 
-    for (const house of houses) {
+    for (const house of plan.houses) {
       const doorX = house.door === 1 ? house.w - 1 : house.door === 3 ? 0 : Math.floor(house.w / 2);
       const doorZ = house.door === 0 ? 0 : house.door === 2 ? house.d - 1 : Math.floor(house.d / 2);
       const dx = house.door === 1 ? 1 : house.door === 3 ? -1 : 0;
@@ -1000,15 +1025,9 @@ export class WorldGenerator {
     const x1 = vx + 22;
     const z0 = vz - 7;
     const z1 = vz + 7;
-    const ground = desert ? ID.sand : ID.grass;
 
-    // Level the paddock and clear anything the flattening pass may have left.
-    for (let z = z0; z <= z1; z++) {
-      for (let x = x0; x <= x1; x++) {
-        set(x, base, z, ground);
-        for (let y = base + 1; y <= base + 7; y++) set(x, y, z, ID.air);
-      }
-    }
+    // The paddock rectangle was already levelled by levelPlot(); everything
+    // below builds on that flat, grassy plot.
 
     // Two-block-high fence with gates on the village side and the south side.
     for (let z = z0; z <= z1; z++) {
@@ -1077,21 +1096,23 @@ export class WorldGenerator {
 
   /**
    * Small village house. `door` is the wall index: 0 north, 1 east, 2 south, 3 west.
-   * The style changes the palette, roof silhouette and interior so a village
-   * reads as a cluster of different buildings instead of five identical boxes.
+   * The style changes the palette, roof silhouette, height and interior, so a
+   * village reads as a cluster of different buildings — cottages, a library,
+   * a blacksmith, a barn and a two-storey townhouse among them.
    */
   buildHouse(x0, z0, base, width, depth, door, set, desert, style = 0) {
-    const styleIndex = style % 7;
-    const walls = [5, 5, 28, 6, desert ? 9 : 42, 5, 23];
-    const corners = [4, 4, 28, 6, desert ? 9 : 42, 34, 23];
-    const roofs = [5, 43, 4, 6, desert ? 9 : 42, 45, 23];
-    const trims = [4, 42, 27, 5, 44, 6, 4];
+    const styleIndex = style % 12;
+    const walls = [5, 5, 28, 6, desert ? 9 : 42, 5, 23, 5, 4, 5, 28, desert ? 9 : 39];
+    const corners = [4, 4, 28, 6, desert ? 9 : 42, 34, 23, 6, 1, 6, 1, 23];
+    const roofs = [5, 43, 4, 6, desert ? 9 : 42, 45, 23, 5, 26, 43, 45, 9];
+    const trims = [4, 42, 27, 5, 44, 6, 4, 42, 28, 6, 28, 39];
     const wall = walls[styleIndex];
     const corner = corners[styleIndex];
     const roof = roofs[styleIndex];
     const trim = trims[styleIndex];
-    const height = styleIndex === 5 ? 4 : 3;
-    const isPitched = styleIndex === 1 || styleIndex === 4 || styleIndex === 5;
+    const height = styleIndex === 10 ? 5 : styleIndex === 5 ? 4 : 3;
+    const isPitched = styleIndex === 1 || styleIndex === 4 || styleIndex === 5
+      || styleIndex === 9 || styleIndex === 10;
     for (let z = 0; z < depth; z++) {
       for (let x = 0; x < width; x++) {
         const wx = x0 + x;
@@ -1112,8 +1133,9 @@ export class WorldGenerator {
               || (door === 3 && x === 0 && z === Math.floor(depth / 2))
             );
             if (isDoor) id = getDoorId(door, false, y);
-            // Windows on the upper row, skipping the doorway column.
-            const window = y === 1 && (
+            // Windows on the lower row and, in tall houses, the upper one,
+            // skipping the doorway column.
+            const window = (y === 1 || (height >= 4 && y === 3)) && (
               (z === 0 && x > 0 && x < width - 1 && x !== Math.floor(width / 2))
               || (z === depth - 1 && x > 0 && x < width - 1 && x !== Math.floor(width / 2))
               || (x === 0 && z > 0 && z < depth - 1)
@@ -1132,10 +1154,35 @@ export class WorldGenerator {
         }
       }
     }
+    // The two-storey townhouse gets a plank floor halfway up.
+    if (height >= 5) {
+      for (let z = 1; z < depth - 1; z++) {
+        for (let x = 1; x < width - 1; x++) set(x0 + x, base + 3, z0 + z, ID.oakPlanks);
+      }
+    }
     // Interior furnishing varies with the style.
-    set(x0 + 1, base + 1, z0 + 1, styleIndex === 0 || styleIndex === 3 ? 21 : 22);
+    set(x0 + 1, base + 1, z0 + 1, styleIndex === 0 || styleIndex === 3 ? ID.craftingTable : ID.furnace);
     set(x0 + 1, base + 1, z0 + depth - 2, ID.chest);
-    if (styleIndex !== 1 && styleIndex !== 4) set(x0 + width - 2, base + 1, z0 + depth - 2, 48);
+    if (styleIndex !== 1 && styleIndex !== 4 && styleIndex !== 8 && styleIndex !== 9) {
+      set(x0 + width - 2, base + 1, z0 + depth - 2, 48); // bookshelf
+    }
+    if (styleIndex === 7) {
+      // Library: the whole back wall between the chest and the corner.
+      for (let x = 2; x < width - 2; x++) set(x0 + x, base + 1, z0 + depth - 2, 48);
+    }
+    if (styleIndex === 8) {
+      // Blacksmith: gravel floor, a second forge and an iron anvil.
+      for (let z = 1; z < depth - 1; z++) {
+        for (let x = 1; x < width - 1; x++) set(x0 + x, base, z0 + z, ID.gravel);
+      }
+      set(x0 + width - 2, base + 1, z0 + depth - 2, ID.furnace);
+      set(x0 + width - 2, base + 1, z0 + 1, 30);
+    }
+    if (styleIndex === 9) {
+      // Barn: bales of hay instead of books.
+      set(x0 + width - 2, base + 1, z0 + depth - 2, ID.hay);
+      set(x0 + width - 2, base + 1, z0 + 1, ID.hay);
+    }
     // Every house gets a real, two-block bed so villagers can actually sleep.
     const bedX = x0 + 2;
     const bedZ = z0 + 1;
@@ -1146,12 +1193,13 @@ export class WorldGenerator {
     if (!(lampX === bedX && (lampZ === bedZ || lampZ === bedZ + 1))) {
       set(lampX, base + 1, lampZ, 29);
     }
-    if (styleIndex === 6) {
-      // Brick workshop chimney rising through the roof.
-      const cx = x0 + width - 2;
-      const cz = z0 + 1;
-      for (let y = base + 2 + height; y <= base + 5 + height; y++) set(cx, y, cz, 4);
-      set(cx, base + 6 + height, cz, 29);
+    if (styleIndex === 6 || styleIndex === 8) {
+      // Chimney rising through the roof: brick workshop, blacksmith forge.
+      const chimneyX = x0 + width - 2;
+      const chimneyZ = z0 + 1;
+      const chimneyId = styleIndex === 6 ? 4 : 28;
+      for (let y = base + 2 + height; y <= base + 5 + height; y++) set(chimneyX, y, chimneyZ, chimneyId);
+      set(chimneyX, base + 6 + height, chimneyZ, 29);
     }
   }
   /* ------------------------------------------------------------------ */

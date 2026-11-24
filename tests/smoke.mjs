@@ -59,7 +59,7 @@ import { getBiomeInfo, biomeWeather } from '../src/shared/biomes.js';
 import { ANIMAL_TIMING, animalDiet } from '../src/shared/animalFoods.js';
 import { Weather } from '../src/render/Weather.js';
 import { Ambience, ambienceModeFor } from '../src/render/Ambience.js';
-import { Rainbow } from '../src/render/Rainbow.js';
+import { Rainbow, RAINBOW_ANCHOR } from '../src/render/Rainbow.js';
 import { BlockParticles, averageTileColor } from '../src/render/BlockParticles.js';
 import { HUD } from '../src/ui/HUD.js';
 import { ContainerStorage } from '../src/game/ContainerStorage.js';
@@ -705,10 +705,10 @@ await test('fresh games spawn inside a village with crops and a livestock farm',
     }, null).village;
 
   const counts = new Map();
-  const minX = village.x - 27;
-  const maxX = village.x + 27;
-  const minZ = village.z - 27;
-  const maxZ = village.z + 27;
+  const minX = village.x - 40;
+  const maxX = village.x + 40;
+  const minZ = village.z - 40;
+  const maxZ = village.z + 40;
   for (let cz = Math.floor(minZ / CHUNK_SIZE); cz <= Math.floor(maxZ / CHUNK_SIZE); cz++) {
     for (let cx = Math.floor(minX / CHUNK_SIZE); cx <= Math.floor(maxX / CHUNK_SIZE); cx++) {
       const chunk = generateChunk(cx, cz, seed);
@@ -724,20 +724,20 @@ await test('fresh games spawn inside a village with crops and a livestock farm',
   assert.ok((counts.get(FARMLAND_BLOCK) ?? 0) > 20, 'village garden should be tilled');
   assert.ok((counts.get(68) ?? 0) > 30, 'village farm should be fenced');
   assert.ok((counts.get(60) ?? 0) > 0, 'village farm should store hay');
-  assert.ok((counts.get(CHEST_BLOCK) ?? 0) >= 7, 'village houses and barn should have chests');
+  assert.ok((counts.get(CHEST_BLOCK) ?? 0) >= 14, 'village houses and barn should have chests');
 });
 
-await test('villages place seven distinct houses with doors, windows and paths', () => {
+await test('villages place fourteen distinct houses with doors, windows and paths', () => {
   const seed = 424242;
   const spawn = findSpawn(seed);
   const village = nearbyVillages(spawn.x, spawn.z, seed)[0];
 
   const collect = (chunkAt) => {
     const blocks = new Map();
-    const minX = village.x - 32;
-    const maxX = village.x + 32;
-    const minZ = village.z - 32;
-    const maxZ = village.z + 32;
+    const minX = village.x - 40;
+    const maxX = village.x + 40;
+    const minZ = village.z - 40;
+    const maxZ = village.z + 40;
     for (let cz = Math.floor(minZ / CHUNK_SIZE); cz <= Math.floor(maxZ / CHUNK_SIZE); cz++) {
       for (let cx = Math.floor(minX / CHUNK_SIZE); cx <= Math.floor(maxX / CHUNK_SIZE); cx++) {
         const chunk = chunkAt(cx, cz);
@@ -767,10 +767,10 @@ await test('villages place seven distinct houses with doors, windows and paths',
     if (id === 12) glass++;
     if (id === 10) paths++;
   }
-  assert.ok(doors >= 14, `expected seven two-block doors, found ${doors}`);
-  assert.ok(doorSpots.size >= 7, `expected seven separate house entrances, found ${doorSpots.size}`);
-  assert.ok(glass >= 24, `expected house windows, found ${glass} glass blocks`);
-  assert.ok(paths >= 30, `expected gravel lanes, found ${paths} path blocks`);
+  assert.ok(doors >= 28, `expected fourteen two-block doors, found ${doors}`);
+  assert.ok(doorSpots.size >= 14, `expected fourteen separate house entrances, found ${doorSpots.size}`);
+  assert.ok(glass >= 80, `expected house windows, found ${glass} glass blocks`);
+  assert.ok(paths >= 60, `expected gravel lanes, found ${paths} path blocks`);
   const spots = [...doorSpots].map((spot) => spot.split(',').map(Number));
   for (let i = 0; i < spots.length; i++) {
     for (let j = i + 1; j < spots.length; j++) {
@@ -2242,7 +2242,7 @@ await test('ambient air changes with biome, daylight and dimension', () => {
   ambience.dispose();
 });
 
-await test('rainbow billboards ahead of the camera and fades after rain', () => {
+await test('rainbow stays fixed in the world and fades after rain', () => {
   const rainbow = new Rainbow({ add() {} });
   const camera = new THREE.PerspectiveCamera();
   camera.position.set(10, 70, -5);
@@ -2252,15 +2252,22 @@ await test('rainbow billboards ahead of the camera and fades after rain', () => 
   rainbow.update(camera, 'rain', 1, 0.5);
   assert.equal(rainbow.mesh.visible, true);
   assert.ok(rainbow.opacity > 0.5, 'rain leaves a visible arc');
-  const direction = new THREE.Vector3();
-  camera.getWorldDirection(direction);
-  const expected = camera.position.clone().addScaledVector(direction, 150);
-  assert.ok(rainbow.mesh.position.distanceTo(expected) < 1e-5, 'arc sits ahead of the view');
-  assert.ok(
-    Math.abs(rainbow.mesh.quaternion.x - camera.quaternion.x) < 1e-6
-    && Math.abs(rainbow.mesh.quaternion.y - camera.quaternion.y) < 1e-6,
-    'arc always faces the player',
-  );
+  const expected = camera.position.clone().addScaledVector(RAINBOW_ANCHOR, 150);
+  assert.ok(rainbow.mesh.position.distanceTo(expected) < 1e-5, 'the arc hangs at a fixed world bearing');
+  assert.equal(rainbow.mesh.rotation.x, 0, 'the arc stays upright');
+  assert.equal(rainbow.mesh.rotation.z, 0, 'the arc never tilts with head bob');
+  const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(rainbow.mesh.quaternion);
+  const towardsCamera = camera.position.clone().sub(rainbow.mesh.position).normalize();
+  assert.ok(normal.dot(towardsCamera) > 0.999, 'the arc faces the player');
+
+  // Turning the head must not drag the rainbow across the sky.
+  const still = rainbow.mesh.position.clone();
+  const yaw = rainbow.mesh.quaternion.clone();
+  camera.rotation.set(-0.9, 2.7, 0.15);
+  camera.updateMatrixWorld();
+  rainbow.update(camera, 'rain', 1, 0.5);
+  assert.ok(rainbow.mesh.position.distanceTo(still) < 1e-5, 'looking around leaves the arc in place');
+  assert.ok(rainbow.mesh.quaternion.angleTo(yaw) < 1e-6, 'head yaw does not rotate the arc');
   assert.ok(rainbow.geometry.getAttribute('color').count > 1000, 'seven bands need real geometry');
 
   rainbow.update(camera, null, 1, 2);
@@ -2531,8 +2538,8 @@ await test('village houses are furnished with real beds', () => {
   const village = nearbyVillages(spawn.x, spawn.z, seed)[0];
   let feet = 0;
   let heads = 0;
-  for (let cz = Math.floor((village.z - 28) / CHUNK_SIZE); cz <= Math.floor((village.z + 28) / CHUNK_SIZE); cz++) {
-    for (let cx = Math.floor((village.x - 28) / CHUNK_SIZE); cx <= Math.floor((village.x + 28) / CHUNK_SIZE); cx++) {
+  for (let cz = Math.floor((village.z - 40) / CHUNK_SIZE); cz <= Math.floor((village.z + 40) / CHUNK_SIZE); cz++) {
+    for (let cx = Math.floor((village.x - 40) / CHUNK_SIZE); cx <= Math.floor((village.x + 40) / CHUNK_SIZE); cx++) {
       const chunk = generateChunk(cx, cz, seed);
       for (const id of chunk.blocks) {
         const state = decodeState(id);
@@ -2542,35 +2549,106 @@ await test('village houses are furnished with real beds', () => {
       }
     }
   }
-  assert.ok(feet >= 7, `expected seven house beds, found ${feet}`);
-  assert.ok(heads >= 7, `expected seven bed headboards, found ${heads}`);
+  assert.ok(feet >= 14, `expected fourteen house beds, found ${feet}`);
+  assert.ok(heads >= 14, `expected fourteen bed headboards, found ${heads}`);
 });
 
-await test('villages sit on stepped terraces with matching column tops', () => {
+await test('villages follow the natural terrain instead of flattening it', () => {
   const seed = 424242;
   const generator = new WorldGenerator(seed);
   const spawn = findSpawn(seed);
   const village = nearbyVillages(spawn.x, spawn.z, seed)[0];
-  const heights = new Set();
-  for (let dz = -27; dz <= 27; dz++) {
-    for (let dx = -27; dx <= 27; dx++) {
-      heights.add(generator.villageSurfaceY(village, village.x + dx, village.z + dz));
+  const plan = generator.villagePlan(village);
+  assert.equal(plan.houses.length, 14, 'the village grew to fourteen houses');
+  assert.ok(
+    new Set(plan.houses.map((house) => house.style)).size >= 10,
+    'houses should come in many styles',
+  );
+
+  // Nothing outside the built plots may be touched: no terrace disc, no
+  // mounds. Every free column keeps exactly the height the noise gave it.
+  const inPlots = (x, z) => plan.plots.some((plot) => (
+    x >= plot.x0 && x <= plot.x1 && z >= plot.z0 && z <= plot.z1
+  ));
+  const tops = new Set();
+  let free = 0;
+  for (let dz = -40; dz <= 40; dz++) {
+    for (let dx = -40; dx <= 40; dx++) {
+      if (Math.hypot(dx, dz) > 40) continue;
+      const wx = village.x + dx;
+      const wz = village.z + dz;
+      if (inPlots(wx, wz)) continue;
+      const surface = generator.villageSurfaceY(village, wx, wz);
+      assert.equal(surface, generator.heightAt(wx, wz), `free ground at ${wx},${wz} stays natural`);
+      tops.add(surface);
+      free++;
     }
   }
-  assert.ok(heights.size >= 3, `expected uneven village platforms, got ${[...heights]}`);
-  const plan = generator.villagePlan(village);
-  assert.equal(plan.houses.length, 7);
-  assert.ok(plan.houses.some((house) => house.base !== village.y), 'a house should sit on its own terrace');
-  const cx = Math.floor(village.x / CHUNK_SIZE);
-  const cz = Math.floor(village.z / CHUNK_SIZE);
-  const chunk = generator.generateChunk(cx, cz);
-  const lx = village.x - cx * CHUNK_SIZE;
-  const lz = village.z - cz * CHUNK_SIZE;
-  assert.equal(
-    chunk.heights[lx + lz * CHUNK_SIZE],
-    generator.villageSurfaceY(village, village.x, village.z),
-    'column tops must follow the terraced surface',
-  );
+  assert.ok(free > 3000, `most of the village area is untouched ground, got ${free}`);
+  assert.ok(tops.size >= 8, `the terrain keeps its relief, got ${tops.size} distinct tops`);
+
+  // Column tops must match the surface the generator actually built: plot
+  // levels inside the plots, raw terrain everywhere else.
+  const chunks = new Map();
+  const chunkAt = (wx, wz) => {
+    const cx = Math.floor(wx / CHUNK_SIZE);
+    const cz = Math.floor(wz / CHUNK_SIZE);
+    const key = `${cx},${cz}`;
+    if (!chunks.has(key)) chunks.set(key, generator.generateChunk(cx, cz));
+    return chunks.get(key);
+  };
+  for (let dz = -24; dz <= 24; dz++) {
+    for (let dx = -24; dx <= 24; dx++) {
+      const wx = village.x + dx;
+      const wz = village.z + dz;
+      const chunk = chunkAt(wx, wz);
+      const lx = wx - Math.floor(wx / CHUNK_SIZE) * CHUNK_SIZE;
+      const lz = wz - Math.floor(wz / CHUNK_SIZE) * CHUNK_SIZE;
+      assert.equal(
+        chunk.heights[lx + lz * CHUNK_SIZE],
+        generator.villageSurfaceY(village, wx, wz),
+        `column tops follow the built surface at ${wx},${wz}`,
+      );
+    }
+  }
+
+  // The free ground keeps its real surface blocks: dirt fill or a dug pit
+  // here would be exactly the old bulges next to the village.
+  const naturalSurfaces = new Set([1, 2, 8, 10, 18, 38, 49]);
+  for (let dz = -36; dz <= 36; dz++) {
+    for (let dx = -36; dx <= 36; dx++) {
+      const wx = village.x + dx;
+      const wz = village.z + dz;
+      if (inPlots(wx, wz)) continue;
+      const h = generator.heightAt(wx, wz);
+      if (h <= SEA_LEVEL + 1) continue;
+      const chunk = chunkAt(wx, wz);
+      const lx = wx - Math.floor(wx / CHUNK_SIZE) * CHUNK_SIZE;
+      const lz = wz - Math.floor(wz / CHUNK_SIZE) * CHUNK_SIZE;
+      const id = chunk.blocks[lx + (lz << 4) + (h << 8)];
+      assert.ok(
+        naturalSurfaces.has(id),
+        `untouched ground at ${wx},${wz} keeps its natural surface, got block ${id}`,
+      );
+    }
+  }
+
+  // Every doorstep is walkable: the floor never sits more than one block
+  // away from the lane that reaches it.
+  for (const house of plan.houses) {
+    const doorX = house.door === 1 ? house.w - 1 : house.door === 3 ? 0 : Math.floor(house.w / 2);
+    const doorZ = house.door === 0 ? 0 : house.door === 2 ? house.d - 1 : Math.floor(house.d / 2);
+    const stepX = house.door === 1 ? 1 : house.door === 3 ? -1 : 0;
+    const stepZ = house.door === 2 ? 1 : house.door === 0 ? -1 : 0;
+    const lane = generator.heightAt(
+      village.x + house.ox + doorX + stepX,
+      village.z + house.oz + doorZ + stepZ,
+    );
+    assert.ok(
+      Math.abs(house.base - lane) <= 1,
+      `doorstep of style ${house.style} is walkable (floor ${house.base}, lane ${lane})`,
+    );
+  }
 });
 
 await test('creatures cannot pass through each other or the player', () => {
@@ -2907,6 +2985,47 @@ await test('explosions remove blocks, spare bedrock and chain into dynamite', as
   assert.equal(game.explosionFlashes.length, 2, 'each detonation flashes');
   Game.prototype.updateExplosionFlashes.call(game, 1);
   assert.equal(game.explosionFlashes.length, 0, 'expired flashes are cleaned up');
+});
+
+await test('explosion craters drink in the neighbouring water', async () => {
+  globalThis.location ??= { search: '' };
+  const { Game } = await import('../src/game/Game.js');
+  const key = (x, y, z) => `${x},${y},${z}`;
+  // A stone shelf: solid floor up to y=4, a wall block at (1,5,0) and a
+  // natural water source behind it at (2,5,0) that nothing has woken yet.
+  const storage = new Map([[key(1, 5, 0), 1]]);
+  const world = {
+    getBlock: (x, y, z) => (y <= 4 ? 1 : storage.get(key(x, y, z)) ?? 0),
+    setBlock(x, y, z, id) { storage.set(key(x, y, z), id); return true; },
+    isSolidAt(x, y, z) { return this.getBlock(x, y, z) !== 0; },
+    getHeightAt() { return 4; },
+    isChunkLoadedAt() { return true; },
+  };
+  const fluids = new FluidSimulation(world);
+  const game = {
+    world,
+    scene: null,
+    audio: null,
+    blockParticles: null,
+    entities: null,
+    player: null,
+    fluids,
+    net: null,
+    primedTnt: [],
+    explosionFlashes: [],
+    sendNetworkEdit() {},
+    setBlockSynced: Game.prototype.setBlockSynced,
+    spawnExplosionFlash: Game.prototype.spawnExplosionFlash,
+    isCreative: () => true,
+  };
+
+  const removed = Game.prototype.explodeAt.call(game, 0.5, 5.5, 0.5, { radius: 1.2, damage: 0 });
+  assert.equal(removed, 2, 'the blast punches two blocks out of the wall and floor');
+  assert.equal(world.getBlock(1, 5, 0), 0, 'the wall block is gone');
+  assert.equal(world.getBlock(2, 5, 0), 11, 'the water source itself survives');
+  for (let i = 0; i < 4; i++) fluids.update(1);
+  assert.equal(world.getBlock(1, 5, 0), 11, 'water pours into the fresh crater');
+  assert.equal(world.getBlock(0, 5, 0), 11, 'and spreads one block further in');
 });
 
 await test('a creeper fuse calls the game explosion hook', async () => {

@@ -10,6 +10,9 @@ const OUTER_RADIUS = 72;
 const CENTER_Y = -58;
 const DISTANCE = 150;
 const RAIN_MEMORY = 1.4;
+// The arc hangs at this fixed compass bearing from the player instead of
+// following the look direction, so turning the head never drags it along.
+export const RAINBOW_ANCHOR = Object.freeze({ x: 0.6, y: 0, z: -0.8 });
 
 const vertexShader = /* glsl */`
   attribute vec3 color;
@@ -69,8 +72,10 @@ function buildArc() {
 }
 
 /**
- * A soft spectrum that lingers for a moment after rain and always faces the
- * player. Additive, unlit and depth-tested, so terrain still occludes it.
+ * A soft spectrum that lingers for a moment after rain. It is anchored at a
+ * fixed world bearing ahead of the player and stays perfectly upright, so
+ * looking around never swings the arc along with the head. Additive, unlit
+ * and depth-tested, so terrain still occludes it.
  */
 export class Rainbow {
   constructor(scene) {
@@ -94,7 +99,6 @@ export class Rainbow {
 
     this.rainTimer = 0;
     this.opacity = 0;
-    this.direction = new THREE.Vector3();
   }
 
   update(camera, weatherMode, daylight, dt) {
@@ -111,9 +115,15 @@ export class Rainbow {
     this.material.uniforms.uOpacity.value = this.opacity;
     if (!this.mesh.visible || !camera) return;
 
-    camera.getWorldDirection(this.direction);
-    this.mesh.position.copy(camera.position).addScaledVector(this.direction, DISTANCE);
-    this.mesh.quaternion.copy(camera.quaternion);
+    // Position follows the player's body, never the head: the bearing to the
+    // arc stays constant while yaw/pitch only decide whether it is on screen.
+    this.mesh.position.copy(camera.position).addScaledVector(RAINBOW_ANCHOR, DISTANCE);
+    // Upright with yaw only, always turned towards the player.
+    this.mesh.rotation.set(
+      0,
+      Math.atan2(camera.position.x - this.mesh.position.x, camera.position.z - this.mesh.position.z),
+      0,
+    );
   }
 
   reset() {
