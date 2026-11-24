@@ -1295,6 +1295,92 @@ input {
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+.welcome-banner {
+  position: absolute;
+  left: 50%;
+  top: clamp(72px, 16vh, 168px);
+  width: min(620px, 84vw);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+}
+
+.welcome-banner.welcome-play {
+  animation: welcome-life var(--welcome-duration, 4600ms) cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.welcome-inner {
+  position: relative;
+  overflow: hidden;
+  padding: 2px;
+  border-radius: 13px;
+  background: linear-gradient(120deg, rgba(120, 230, 255, .9), rgba(255, 226, 140, .95), rgba(255, 150, 220, .9));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .55), 0 0 42px rgba(120, 210, 255, .22);
+}
+
+.welcome-inner::before {
+  content: '';
+  position: absolute;
+  width: 240%;
+  height: 420%;
+  left: -70%;
+  top: -160%;
+  background: conic-gradient(from 0deg, transparent 0 35%, rgba(255, 255, 255, .8) 46%, transparent 57% 100%);
+  animation: welcome-spin 4.5s linear infinite;
+}
+
+.welcome-inner::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(11, 25, 34, .96), rgba(7, 12, 20, .94) 58%, rgba(24, 14, 34, .96));
+}
+
+.welcome-content {
+  position: relative;
+  z-index: 1;
+  padding: 20px 24px 18px;
+  text-align: center;
+}
+
+.welcome-title {
+  font-family: var(--pixel);
+  font-size: clamp(20px, 3.2vw, 32px);
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, #9ce7ff, #fff2b0 38%, #ffb3e6 70%, #9ce7ff);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 12px rgba(140, 220, 255, .35));
+  animation: welcome-shimmer 3.2s linear infinite;
+}
+
+.welcome-subtitle {
+  margin-top: 8px;
+  color: #c8d8dc;
+  font-size: 13px;
+  letter-spacing: .05em;
+}
+
+@keyframes welcome-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes welcome-shimmer {
+  to { background-position: 220% 0; }
+}
+
+@keyframes welcome-life {
+  0% { opacity: 0; transform: translate(-50%, -20px) scale(.94); }
+  12%, 74% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, 12px) scale(1.02); }
+}
+
 .underwater-overlay {
   position: absolute;
   inset: 0;

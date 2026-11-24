@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import * as THREE from 'three';
 
 import {
   CHUNK_SIZE,
@@ -55,6 +56,10 @@ import { CHEST_BLOCK, CHEST_SLOTS } from '../src/shared/storage.js';
 import { getBiomeInfo, biomeWeather } from '../src/shared/biomes.js';
 import { ANIMAL_TIMING, animalDiet } from '../src/shared/animalFoods.js';
 import { Weather } from '../src/render/Weather.js';
+import { Ambience, ambienceModeFor } from '../src/render/Ambience.js';
+import { Rainbow } from '../src/render/Rainbow.js';
+import { BlockParticles, averageTileColor } from '../src/render/BlockParticles.js';
+import { HUD } from '../src/ui/HUD.js';
 import { ContainerStorage } from '../src/game/ContainerStorage.js';
 import { isInWater, waterSurfaceAt } from '../src/shared/water.js';
 import { TEXTURE_COUNT, TILE } from '../src/shared/textures.js';
@@ -2189,6 +2194,164 @@ await test('weather follows the camera and switches between rain and snow', () =
   weather.update(camera, null, 1 / 60);
   assert.equal(weather.points.visible, false, 'clear biomes show no precipitation');
   weather.dispose();
+});
+
+await test('ambient air changes with biome, daylight and dimension', () => {
+  assert.equal(ambienceModeFor({ category: 'forest', daylight: 1 }), 'pollen');
+  assert.equal(ambienceModeFor({ category: 'birch', daylight: 0.8 }), 'pollen');
+  assert.equal(ambienceModeFor({ category: 'swamp', daylight: 0.8 }), 'petals');
+  assert.equal(ambienceModeFor({ category: 'forest', daylight: 0.1 }), 'fireflies');
+  assert.equal(ambienceModeFor({ category: 'snowy', daylight: 1 }), 'ice');
+  assert.equal(ambienceModeFor({ category: 'desert', daylight: 1 }), 'dust');
+  assert.equal(ambienceModeFor({ dimension: 'nether' }), 'embers');
+  assert.equal(ambienceModeFor({ dimension: 'end' }), 'void');
+
+  const ambience = new Ambience({ add() {} }, 40);
+  const camera = { position: { x: 5, y: 12, z: -3 } };
+  const start = Array.from(ambience.positions.slice(0, 3));
+  ambience.update(camera, 'pollen', 0.5);
+  assert.equal(ambience.mode, 'pollen');
+  assert.equal(ambience.points.visible, true);
+  assert.deepEqual(
+    [ambience.points.position.x, ambience.points.position.y, ambience.points.position.z],
+    [5, 12, -3],
+  );
+  assert.notDeepEqual(Array.from(ambience.positions.slice(0, 3)), start, 'motes drift over time');
+  const pollen = ambience.baseColors[1];
+  ambience.update(camera, 'fireflies', 0.1);
+  assert.notEqual(ambience.baseColors[1], pollen, 'each mood has its own palette');
+  assert.equal(ambience.material.blending, THREE.AdditiveBlending, 'night motes glow');
+  ambience.clear();
+  assert.equal(ambience.points.visible, false);
+  ambience.dispose();
+});
+
+await test('rainbow billboards ahead of the camera and fades after rain', () => {
+  const rainbow = new Rainbow({ add() {} });
+  const camera = new THREE.PerspectiveCamera();
+  camera.position.set(10, 70, -5);
+  camera.rotation.set(0.08, 0.6, 0);
+  camera.updateMatrixWorld();
+
+  rainbow.update(camera, 'rain', 1, 0.5);
+  assert.equal(rainbow.mesh.visible, true);
+  assert.ok(rainbow.opacity > 0.5, 'rain leaves a visible arc');
+  const direction = new THREE.Vector3();
+  camera.getWorldDirection(direction);
+  const expected = camera.position.clone().addScaledVector(direction, 150);
+  assert.ok(rainbow.mesh.position.distanceTo(expected) < 1e-5, 'arc sits ahead of the view');
+  assert.ok(
+    Math.abs(rainbow.mesh.quaternion.x - camera.quaternion.x) < 1e-6
+    && Math.abs(rainbow.mesh.quaternion.y - camera.quaternion.y) < 1e-6,
+    'arc always faces the player',
+  );
+  assert.ok(rainbow.geometry.getAttribute('color').count > 1000, 'seven bands need real geometry');
+
+  rainbow.update(camera, null, 1, 2);
+  assert.equal(rainbow.opacity, 0, 'the arc fades once the memory expires');
+  assert.equal(rainbow.mesh.visible, false);
+  rainbow.reset();
+  assert.equal(rainbow.rainTimer, 0);
+  rainbow.dispose();
+});
+
+await test('block debris samples atlas colours, flies and expires', () => {
+  const data = new Uint8ClampedArray(16 * 16 * 4);
+  for (let i = 0; i < 16 * 16; i++) {
+    data[i * 4] = 220;
+    data[i * 4 + 1] = 40;
+    data[i * 4 + 2] = 30;
+    data[i * 4 + 3] = 255;
+  }
+  const canvas = {
+    width: 16,
+    height: 16,
+    getContext: () => ({ getImageData: () => ({ data }) }),
+  };
+  const tile = getBlock(1).faceTiles[0];
+  const assets = { tileCanvases: new Map([[tile, canvas]]) };
+  const color = averageTileColor(assets, tile);
+  assert.ok(color.r > color.g && color.g > color.b, 'the atlas tile supplies a warm stone colour');
+  assert.equal(averageTileColor(assets, 999), null);
+
+  const particles = new BlockParticles({ add() {} }, assets, 64);
+  assert.ok(particles.blockColor(1).r > 0.5, 'block colours are cached from the atlas');
+  particles.burst(0.5, 4.5, -1.5, 1, 12);
+  assert.equal(particles.points.visible, true);
+  assert.ok(particles.life[0] > 0);
+  const y = particles.positions[1];
+  particles.update(0.05);
+  assert.notEqual(particles.positions[1], y, 'debris is launched and pulled by gravity');
+  particles.update(2);
+  assert.equal(particles.life[0], 0);
+  assert.equal(particles.points.visible, false, 'expired debris is culled');
+  particles.dispose();
+});
+
+await test('breaking and mirrored LAN edits spawn block debris', async () => {
+  globalThis.location ??= { search: '' };
+  const { Game } = await import('../src/game/Game.js');
+  const bursts = [];
+  const particles = {
+    burst(...args) { bursts.push(args); },
+  };
+  const game = {
+    inventory: { selectedStack: null, damageSelected: () => false },
+    world: { setBlock: () => true },
+    redstone: null,
+    fluids: null,
+    sendNetworkEdit() {},
+    blockParticles: particles,
+    audio: { playBreak() {} },
+    isCreative: () => true,
+    onInventoryChanged() {},
+  };
+  Game.prototype.breakBlock.call(game, { x: 3, y: 9, z: -2 }, { id: 17 });
+  assert.deepEqual(bursts[0].slice(0, 4), [3.5, 9.5, -1.5, 17]);
+
+  Game.prototype.applyNetworkEdit.call({
+    world: {
+      getBlock: () => 17,
+      setBlock: () => true,
+      isChunkLoadedAt: () => true,
+    },
+    blockParticles: particles,
+  }, { x: 1, y: 8, z: 2, id: 0 });
+  assert.deepEqual(bursts[1].slice(0, 4), [1.5, 8.5, 2.5, 17]);
+});
+
+await test('new worlds open with a replayable welcome banner', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.match(html, /id="welcome-banner"/);
+  assert.match(html, /id="welcome-title"/);
+  assert.match(css, /\.welcome-banner\.welcome-play\s*\{[^}]*welcome-life/);
+
+  const classes = new Set(['hidden']);
+  const style = {
+    setProperty(key, value) { this[key] = value; },
+  };
+  const title = { textContent: '' };
+  const subtitle = { textContent: '' };
+  const hud = Object.create(HUD.prototype);
+  hud.welcomeEl = {
+    style,
+    offsetWidth: 620,
+    classList: {
+      add(...names) { for (const name of names) classes.add(name); },
+      remove(...names) { for (const name of names) classes.delete(name); },
+    },
+  };
+  hud.welcomeTitleEl = title;
+  hud.welcomeSubtitleEl = subtitle;
+  hud.showWelcome('Мир проснулся', 'оглянись', 80);
+  assert.equal(title.textContent, 'Мир проснулся');
+  assert.equal(subtitle.textContent, 'оглянись');
+  assert.equal(style['--welcome-duration'], '80ms');
+  assert.ok(classes.has('welcome-play') && !classes.has('hidden'));
+
+  hud.showWelcome('Ещё раз', '', 80);
+  assert.ok(classes.has('welcome-play'), 'the animation can be replayed');
 });
 
 await test('animals can be tamed, fed, bred and grow from babies', () => {

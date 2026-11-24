@@ -61,6 +61,9 @@ import { buildTextureAssets } from '../render/TextureAtlas.js';
 import { createTextureArray, TerrainMaterials } from '../render/TerrainMaterials.js';
 import { Sky } from '../render/Sky.js';
 import { Weather } from '../render/Weather.js';
+import { Ambience, ambienceModeFor } from '../render/Ambience.js';
+import { Rainbow } from '../render/Rainbow.js';
+import { BlockParticles } from '../render/BlockParticles.js';
 import { HUD } from '../ui/HUD.js';
 import { normalizeMapPoint } from '../ui/minimap.js';
 import { InventoryUI } from '../ui/InventoryUI.js';
@@ -267,6 +270,9 @@ export class Game {
     this.materials = null;
     this.sky = null;
     this.weather = new Weather(this.scene);
+    this.ambience = new Ambience(this.scene);
+    this.rainbow = new Rainbow(this.scene);
+    this.blockParticles = new BlockParticles(this.scene, this.assets);
     this.selection = null;
     this.dimension = 'overworld';
     this.returnPoint = null;
@@ -1499,6 +1505,7 @@ export class Game {
     const oldId = this.world.getBlock(x, y, z);
     if (!this.world.setBlock(x, y, z, id)) return;
     if (id === 0 && oldId !== 0) {
+      this.blockParticles?.burst(x + 0.5, y + 0.5, z + 0.5, oldId);
       this.redstone?.onBlockRemoved(x, y, z, oldId);
     }
     this.redstone?.notify(x, y, z);
@@ -2200,7 +2207,13 @@ export class Game {
     } else if (info.isSave) {
       this.hud.toast(`${this.currentWorldName || 'Мир'} загружен · ${GAME_MODE_LABELS[this.gameMode]} · сид ${this.seedLabel}`, 2400);
     } else {
-      this.hud.toast(`${this.currentWorldName || 'Новый мир'} · ${GAME_MODE_LABELS[this.gameMode]} · сид ${this.seedLabel}`, 2400);
+      const worldName = this.currentWorldName || 'Новый мир';
+      this.hud.toast(`${worldName} · ${GAME_MODE_LABELS[this.gameMode]} · сид ${this.seedLabel}`, 2400);
+      // First join is the one moment we can make unmistakably magical.
+      this.hud.showWelcome?.('Мир проснулся', `${worldName} · оглянись, здесь всё живое`, 4600);
+      this.audio.tone({ frequency: 523.25, duration: 0.5, gain: 0.03, type: 'sine' });
+      this.audio.tone({ frequency: 659.25, duration: 0.6, gain: 0.027, type: 'sine', delay: 0.09 });
+      this.audio.tone({ frequency: 783.99, duration: 0.9, gain: 0.024, type: 'sine', delay: 0.18 });
     }
   }
 
@@ -2254,6 +2267,9 @@ export class Game {
       this.sky = null;
     }
     this.weather?.update(this.camera, null, 0);
+    this.ambience?.clear();
+    this.rainbow?.reset();
+    this.blockParticles?.clear();
     if (this.materials) {
       this.materials.dispose();
       this.materials = null;
@@ -2848,6 +2864,7 @@ export class Game {
     this.redstone?.notify(mining.x, mining.y, mining.z);
     this.fluids?.wake(mining.x, mining.y, mining.z);
     this.sendNetworkEdit(mining.x, mining.y, mining.z, 0);
+    this.blockParticles?.burst(mining.x + 0.5, mining.y + 0.5, mining.z + 0.5, block.id);
     this.audio.playBreak(block);
     if (block.id === CHEST_BLOCK) {
       const contents = this.containers.remove(mining.x, mining.y, mining.z);
@@ -3504,6 +3521,7 @@ export class Game {
     const block = getBlock(blockId);
     for (const part of parts) {
       if (!this.setBlockSynced(part.x, part.y, part.z, part.id)) return;
+      this.blockParticles?.burst(part.x + 0.5, part.y + 0.5, part.z + 0.5, part.id, 8);
       this.redstone?.notify(part.x, part.y, part.z);
       if (getBlock(part.id).fluid) {
         this.fluids?.setSource(part.x, part.y, part.z, part.id);
@@ -3746,6 +3764,7 @@ export class Game {
     const dimension = dimensionAt(this.player.position.x, this.player.position.z);
     this.dimension = dimension;
     let weatherMode = null;
+    let biomeCategory = 'plains';
     if (dimension === 'overworld') {
       this.sky.clouds.visible = true;
       // Biomes tint the local atmosphere without erasing the day/night cycle:
@@ -3755,6 +3774,7 @@ export class Game {
         Math.floor(this.player.position.z),
       );
       const info = getBiomeInfo(biomeId);
+      biomeCategory = info.category;
       BIOME_FOG.setHex(info.fog);
       BIOME_SKY_TOP.setHex(info.skyTop);
       BIOME_SKY_HORIZON.setHex(info.skyHorizon);
@@ -3782,6 +3802,15 @@ export class Game {
       environment.daylight = nether ? 0.5 : 0.65;
     }
     this.weather?.update(this.camera, weatherMode, dt);
+    const ambienceMode = ambienceModeFor({
+      dimension,
+      category: biomeCategory,
+      daylight: environment.daylight,
+      weather: weatherMode,
+    });
+    this.ambience?.update(this.camera, ambienceMode, dt);
+    this.rainbow?.update(this.camera, weatherMode, environment.daylight, dt);
+    this.blockParticles?.update(dt);
     this.materials.update({
       fogColor: environment.fogColor,
       sunDir: environment.sunDir,

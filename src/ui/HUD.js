@@ -32,6 +32,9 @@ export class HUD {
     this.biomeEl = $('biome-label');
     this.coordsEl = $('coords-label');
     this.toastEl = $('toast');
+    this.welcomeEl = $('welcome-banner');
+    this.welcomeTitleEl = $('welcome-title');
+    this.welcomeSubtitleEl = $('welcome-subtitle');
     this.underwaterEl = $('underwater-overlay');
     this.damageEl = $('damage-overlay');
     this.healthBar = $('health-bar');
@@ -371,6 +374,24 @@ export class HUD {
     clearTimeout(this.toastTimer);
     this.toastTimer = setTimeout(() => {
       this.toastEl.classList.add('hidden');
+    }, duration);
+  }
+
+  /** Cinematic first-join banner; safe to call before the element exists. */
+  showWelcome(title, subtitle = '', duration = 4600) {
+    const element = this.welcomeEl;
+    if (!element) return;
+    if (this.welcomeTitleEl) this.welcomeTitleEl.textContent = title;
+    if (this.welcomeSubtitleEl) this.welcomeSubtitleEl.textContent = subtitle;
+    clearTimeout(this.welcomeTimer);
+    element.style?.setProperty?.('--welcome-duration', `${duration}ms`);
+    element.classList.remove('hidden', 'welcome-play');
+    // Force a style flush so replaying the animation restarts it from zero.
+    void element.offsetWidth;
+    element.classList.add('welcome-play');
+    this.welcomeTimer = setTimeout(() => {
+      element.classList.remove('welcome-play');
+      element.classList.add('hidden');
     }, duration);
   }
 
