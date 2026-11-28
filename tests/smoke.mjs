@@ -60,6 +60,7 @@ import { ANIMAL_TIMING, animalDiet } from '../src/shared/animalFoods.js';
 import { Weather } from '../src/render/Weather.js';
 import { Ambience, ambienceModeFor } from '../src/render/Ambience.js';
 import { Rainbow, RAINBOW_ANCHOR } from '../src/render/Rainbow.js';
+import { Viewmodel } from '../src/render/Viewmodel.js';
 import { BlockParticles, averageTileColor } from '../src/render/BlockParticles.js';
 import { HUD } from '../src/ui/HUD.js';
 import { ContainerStorage } from '../src/game/ContainerStorage.js';
@@ -3058,6 +3059,52 @@ await test('a creeper fuse calls the game explosion hook', async () => {
   lone.updateFuse(1.4, victim, victim, plain);
   assert.ok(hit && hit.cause.includes('крипер'), 'the fallback still wounds the target');
   assert.equal(lone.exploded, true);
+});
+
+await test('first-person viewmodel shows a block, an icon and a swing', () => {
+  const fakeCanvas = {};
+  const assets = {
+    tileCanvases: new Map([[1, fakeCanvas], [2, fakeCanvas], [3, fakeCanvas], [4, fakeCanvas], [5, fakeCanvas], [6, fakeCanvas]]),
+    iconCanvasCache: new Map([[ITEM_IDS.APPLE, fakeCanvas]]),
+  };
+  const viewmodel = new Viewmodel({ assets, appearance: { skin: 'tan', outfit: 'red' } });
+  assert.equal(viewmodel.held.children.length, 0, 'an empty hand starts bare');
+  assert.equal(viewmodel.scene.children.length, 3, 'the overlay carries a root and two lights');
+  assert.equal(viewmodel.sleeveMaterial.color.getHex(), 0xb4443e, 'the sleeve follows the character creator');
+
+  viewmodel.update(0.016, { visible: true, heldId: 1 });
+  assert.equal(viewmodel.heldId, 1);
+  assert.equal(viewmodel.held.children.length, 1, 'a held block becomes a cube');
+  assert.equal(viewmodel.held.children[0].material.length, 6, 'all six block faces are textured');
+
+  viewmodel.update(0.016, { visible: true, heldId: ITEM_IDS.APPLE });
+  assert.equal(viewmodel.held.children.length, 1, 'a loose item becomes a pixel-art billboard');
+  assert.equal(viewmodel.held.children[0].geometry.type, 'PlaneGeometry');
+
+  viewmodel.update(0.016, { visible: true, heldId: null });
+  assert.equal(viewmodel.held.children.length, 0, 'empty hands are restored');
+
+  const idleRotation = viewmodel.root.rotation.x;
+  viewmodel.swing();
+  assert.ok(viewmodel.swingTime > 0, 'swinging starts an animation');
+  viewmodel.update(0.08, { visible: true });
+  assert.ok(viewmodel.root.rotation.x < idleRotation - 0.2, 'the arm arcs downward while swinging');
+  viewmodel.update(1, { visible: false });
+  assert.equal(viewmodel.visible, false, 'the hand hides in third person');
+  viewmodel.dispose();
+});
+
+await test('GUI uses flat classic Minecraft styling', () => {
+  const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  assert.ok(css.includes('--pixel:'), 'a chunky monospace pixel font is defined');
+  assert.ok(css.includes('mix-blend-mode: normal'), 'the crosshair is a plain white cross');
+  assert.ok(css.includes('background: #8b8b8b'), 'slots use the classic grey bevel');
+  assert.ok(css.includes('background: #c6c6c6'), 'the inventory uses the classic light grey');
+  assert.ok(!css.includes('backdrop-filter: blur'), 'frosted-glass panels are gone');
+
+  const sky = readFileSync(new URL('../src/render/Sky.js', import.meta.url), 'utf8');
+  assert.ok(sky.includes('export const CLOUD_CELL'), 'clouds are built from pixel cells');
+  assert.ok(sky.includes('sunSquare') && sky.includes('moonSquare'), 'sun and moon are flat squares');
 });
 
 console.log(`\n${results.length - failed}/${results.length} tests passed.`);

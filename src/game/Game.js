@@ -65,6 +65,7 @@ import { Sky } from '../render/Sky.js';
 import { Weather } from '../render/Weather.js';
 import { Ambience, ambienceModeFor } from '../render/Ambience.js';
 import { Rainbow } from '../render/Rainbow.js';
+import { Viewmodel } from '../render/Viewmodel.js';
 import { BlockParticles } from '../render/BlockParticles.js';
 import { HUD } from '../ui/HUD.js';
 import { normalizeMapPoint } from '../ui/minimap.js';
@@ -255,6 +256,10 @@ export class Game {
     this.playerModel.group.visible = false;
     this.scene.add(this.playerModel.group);
 
+    // The first-person arm lives in its own overlay pass so it never clips
+    // into the terrain, just like Minecraft's held-item layer.
+    this.viewmodel = new Viewmodel({ assets: this.assets, appearance: this.appearance });
+
     // Models load in the background; the procedural versions cover the gap.
     preloadModels().then(() => {
       this.playerModel?.refreshModel();
@@ -285,6 +290,7 @@ export class Game {
     this.lastDeath = null;
     this.teleportCooldown = 0;
     this.attackCooldown = 0;
+    this.lastAttackDown = false;
     this.riding = null;
     this.spawn = { x: 0.5, y: 80, z: 0.5 };
     this.seedLabel = '';
@@ -1957,6 +1963,7 @@ export class Game {
     this.netName = appearance.name;
     if ($('lan-name')) $('lan-name').value = this.netName;
     this.playerModel.setAppearance(appearance);
+    this.viewmodel?.setAppearance(appearance);
     this.inventoryUI?.preview?.setAppearance(appearance);
     this.characterCreator.close();
 
@@ -2887,6 +2894,15 @@ export class Game {
     const active = this.state === 'playing' || this.state === 'inventory' || this.state === 'trade' || this.state === 'loading';
     this.updateEnvironment(active ? dt : 0);
     this.renderer.render(this.scene, this.camera);
+
+    // Held arm draws after the world with a cleared depth buffer, so it stays
+    // in front of nearby blocks and follows the character's appearance.
+    this.viewmodel?.update(dt, {
+      visible: (this.state === 'playing' || this.state === 'inventory') && this.cameraMode === 0 && !this.riding && !!this.player,
+      heldId: this.inventory?.selectedStack?.id ?? null,
+      walking: !!this.player?.onGround && (this.player.velocity?.lengthSq?.() ?? 0) > 0.01,
+    });
+    this.viewmodel?.render(this.renderer, this.canvas?.width ?? 0, this.canvas?.height ?? 0);
   }
 
   updatePlaying(dt) {
@@ -2895,6 +2911,12 @@ export class Game {
       this.enterDeathState(true);
       return;
     }
+
+    // A fresh left click swings the held arm even when it hits nothing, as in
+    // Minecraft; holding the button only keeps mining.
+    const attackDown = this.input.isMouseDown(0);
+    if (attackDown && !this.lastAttackDown) this.viewmodel?.swing();
+    this.lastAttackDown = attackDown;
 
     this.eatCooldown = Math.max(0, this.eatCooldown - dt);
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
@@ -3065,6 +3087,7 @@ export class Game {
 
     if (mining.progress >= 1) {
       this.breakBlock(mining, block);
+      this.viewmodel?.swing();
       this.resetMining();
     }
   }
@@ -3785,6 +3808,7 @@ export class Game {
     }
     if (!this.isCreative()) this.inventory.consumeSelected(1);
     this.audio.playPlace(block);
+    this.viewmodel?.swing();
     // Building the last block of a 4x5 obsidian frame lights the portal right
     // away, so finishing the frame is enough to travel to the Nether.
     if (blockId === 25) {

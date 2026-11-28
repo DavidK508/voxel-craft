@@ -36,14 +36,27 @@ const skyFragment = /* glsl */`
     vec3 color = mix(uHorizon, uTop, smoothstep(0.0, 0.62, h));
     color = mix(uBottom, color, smoothstep(-0.22, 0.02, h));
 
-    float sunDot = dot(dir, normalize(uSunDir));
-    float sun = smoothstep(0.9991, 0.99975, sunDot);
+    // Minecraft's sun and moon are flat square textures, not round discs.
+    // Project the view ray onto the tangent plane of each body and cut a
+    // hard-edged square out of it instead of smoothing a spherical dot.
+    vec3 sunDir = normalize(uSunDir);
+    vec3 sunRef = abs(sunDir.y) > 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 sunRight = normalize(cross(sunDir, sunRef));
+    vec3 sunUp = cross(sunRight, sunDir);
+    float sunDot = dot(dir, sunDir);
+    float sunSquare = (1.0 - smoothstep(0.020, 0.022, max(abs(dot(dir, sunRight)), abs(dot(dir, sunUp)))))
+      * step(0.999, sunDot);
     float glow = pow(max(sunDot, 0.0), 18.0) * 0.35;
-    color += uSunColor * (sun * 1.6 + glow);
+    color += uSunColor * (sunSquare * 1.6 + glow);
 
-    float moonDot = dot(dir, normalize(uMoonDir));
-    float moon = smoothstep(0.99955, 0.9999, moonDot);
-    color += vec3(0.72, 0.8, 0.95) * moon * (1.0 - uDaylight) * 1.4;
+    vec3 moonDir = normalize(uMoonDir);
+    vec3 moonRef = abs(moonDir.y) > 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 moonRight = normalize(cross(moonDir, moonRef));
+    vec3 moonUp = cross(moonRight, moonDir);
+    float moonDot = dot(dir, moonDir);
+    float moonSquare = (1.0 - smoothstep(0.014, 0.016, max(abs(dot(dir, moonRight)), abs(dot(dir, moonUp)))))
+      * step(0.9995, moonDot);
+    color += vec3(0.72, 0.8, 0.95) * moonSquare * (1.0 - uDaylight) * 1.4;
 
     if (uStars > 0.01 && h > -0.05) {
       vec3 cell = floor(dir * 420.0);
@@ -59,25 +72,35 @@ const skyFragment = /* glsl */`
   }
 `;
 
-function makeCloudTexture() {
-  const size = 128;
+/** Pixel cells of 4x4 texels: Minecraft's clouds are flat squares, not fog. */
+export const CLOUD_CELL = 4;
+
+function makeCloudTexture(size = 128) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   const noise = new SimplexNoise(0x8c10d);
   const image = ctx.createImageData(size, size);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const n = noise.fbm2(x * 0.045, y * 0.045, 5, 2, 0.5);
-      const n2 = noise.fbm2(x * 0.012 + 30, y * 0.012 - 10, 3, 2, 0.5);
+  const cells = size / CLOUD_CELL;
+  for (let cy = 0; cy < cells; cy++) {
+    for (let cx = 0; cx < cells; cx++) {
+      // Sample once per cell, then paint the whole square with one opacity.
+      const sx = cx * CLOUD_CELL + CLOUD_CELL / 2;
+      const sy = cy * CLOUD_CELL + CLOUD_CELL / 2;
+      const n = noise.fbm2(sx * 0.045, sy * 0.045, 5, 2, 0.5);
+      const n2 = noise.fbm2(sx * 0.012 + 30, sy * 0.012 - 10, 3, 2, 0.5);
       const value = n * 0.65 + n2 * 0.35;
-      const alpha = value > 0.16 ? Math.min(210, (value - 0.16) * 900) : 0;
-      const index = (y * size + x) * 4;
-      image.data[index] = 255;
-      image.data[index + 1] = 255;
-      image.data[index + 2] = 255;
-      image.data[index + 3] = alpha;
+      const alpha = value > 0.12 ? 210 : 0;
+      for (let dy = 0; dy < CLOUD_CELL; dy++) {
+        for (let dx = 0; dx < CLOUD_CELL; dx++) {
+          const index = ((cy * CLOUD_CELL + dy) * size + cx * CLOUD_CELL + dx) * 4;
+          image.data[index] = 255;
+          image.data[index + 1] = 255;
+          image.data[index + 2] = 255;
+          image.data[index + 3] = alpha;
+        }
+      }
     }
   }
   ctx.putImageData(image, 0, 0);
@@ -85,7 +108,8 @@ function makeCloudTexture() {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
